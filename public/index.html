@@ -16,7 +16,9 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="ops-theme">
-  <a href="#controls-container" class="skip-link">Skip to Disruption Controls</a>
+  <!-- Accessibility Skip Navigation Links (WCAG 2.1 AAA) -->
+  <a href="#main-content" class="skip-link">Skip to Main Content</a>
+  <a href="#controls-container" class="skip-link skip-link-secondary">Skip to Disruption Controls</a>
 
   <!-- Command Operations Header -->
   <header class="app-header" role="banner">
@@ -27,25 +29,25 @@
           <span class="beacon-core"></span>
         </div>
         <div class="brand-text">
-          <span class="brand-title">DOMINO SKY</span>
+          <h1 class="brand-title">DOMINO SKY</h1>
           <span class="brand-sub">NETWORK OPERATIONS CENTER</span>
         </div>
       </div>
 
-      <div class="network-badge font-mono" title="Active Fleet and Airspace Telemetry">
-        <span class="status-pulse-dot"></span>
+      <div class="network-badge font-mono" title="Active Fleet and Airspace Telemetry" role="status" aria-label="Network status: 16 Hubs, 70 Flights, 18 Aircraft">
+        <span class="status-pulse-dot" aria-hidden="true"></span>
         <span class="network-stats">16 Hubs &bull; 70 Flights &bull; 18 Aircraft</span>
       </div>
     </div>
 
     <div class="header-right">
-      <div class="engine-stamp font-mono" title="Formal Verification: engine.js single source of truth">
-        <span class="stamp-verified-icon">&check;</span>
+      <div class="engine-stamp font-mono" title="Formal Verification: engine.js single source of truth" role="note" aria-label="Deterministic Engine Verified">
+        <span class="stamp-verified-icon" aria-hidden="true">&check;</span>
         <span class="stamp-verified-label">Deterministic Engine</span>
       </div>
 
-      <button class="btn btn-ghost btn-sm font-mono" id="btn-header-reset" title="Reset all scenarios and clear disruptions">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <button class="btn btn-ghost btn-sm font-mono" id="btn-header-reset" title="Reset all scenarios and clear disruptions" aria-label="Reset simulation to baseline schedule">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
           <path d="M3 3v5h5"/>
         </svg>
@@ -57,44 +59,44 @@
   <!-- Main Multi-Column Operations Deck -->
   <main class="ops-layout" id="main-content" role="main">
     <!-- LEFT PANEL: Scenario Simulation Controls & AI Recovery Dispatch -->
-    <aside class="panel left-panel" role="region" aria-label="Scenario Controls & Recovery Dispatch">
+    <aside class="panel left-panel" aria-label="Scenario Controls & Recovery Dispatch">
       <!-- 1. Controls Container -->
-      <section id="controls-container" class="panel-section"></section>
+      <section id="controls-container" class="panel-section" aria-labelledby="heading-disruption"></section>
 
       <!-- 2. AI Dispatcher Container -->
-      <section id="dispatcher-container" class="panel-section"></section>
+      <section id="dispatcher-container" class="panel-section" aria-labelledby="heading-dispatcher"></section>
     </aside>
 
     <!-- CENTER PANEL: Tactical Airspace Radar (Top) & Rotational Fleet Timeline (Bottom) -->
-    <section class="panel center-panel" role="region" aria-label="Tactical Airspace Map and Timeline">
+    <section class="panel center-panel" aria-label="Tactical Airspace Map and Timeline">
       <!-- Airspace Radar Deck -->
-      <div class="center-top-box">
+      <div class="center-top-box" role="region" aria-labelledby="heading-radar">
         <div class="box-header">
           <div class="box-header-title-group">
-            <span class="box-title">Tactical Airspace Radar</span>
+            <h2 class="box-title" id="heading-radar">Tactical Airspace Radar</h2>
             <span class="box-badge font-mono">INDIA FIR SYSTEM</span>
           </div>
-          <div class="map-legend font-mono">
-            <span class="leg-item"><span class="leg-pip leg-ontime"></span> On Time</span>
-            <span class="leg-item"><span class="leg-pip leg-delayed"></span> Delayed</span>
-            <span class="leg-item"><span class="leg-pip leg-cancelled"></span> Cancelled</span>
-            <span class="leg-item"><span class="leg-pip leg-closure"></span> Hub Closure</span>
+          <div class="map-legend font-mono" role="group" aria-label="Radar status legend">
+            <span class="leg-item"><span class="leg-pip leg-ontime" aria-hidden="true"></span> On Time</span>
+            <span class="leg-item"><span class="leg-pip leg-delayed" aria-hidden="true"></span> Delayed</span>
+            <span class="leg-item"><span class="leg-pip leg-cancelled" aria-hidden="true"></span> Cancelled</span>
+            <span class="leg-item"><span class="leg-pip leg-closure" aria-hidden="true"></span> Hub Closure</span>
           </div>
         </div>
         <div class="map-viewport" id="map-container"></div>
       </div>
 
       <!-- Gantt Fleet Rotations Deck -->
-      <div class="center-bottom-box" id="gantt-container"></div>
+      <div class="center-bottom-box" id="gantt-container" role="region" aria-labelledby="heading-gantt"></div>
     </section>
 
     <!-- RIGHT PANEL: Network KPIs & Forensic Inspector -->
-    <aside class="panel right-panel" role="region" aria-label="Network Telemetry and Forensic Inspector">
+    <aside class="panel right-panel" aria-label="Network Telemetry and Forensic Inspector">
       <!-- Executive KPIs -->
-      <section class="right-kpi-section" id="kpi-container"></section>
+      <section class="right-kpi-section" id="kpi-container" aria-labelledby="heading-kpi"></section>
 
       <!-- Root Cause & Telemetry Inspector -->
-      <section class="right-inspector-section" id="inspector-container"></section>
+      <section class="right-inspector-section" id="inspector-container" aria-labelledby="heading-inspector"></section>
     </aside>
   </main>
 

@@ -36,26 +36,28 @@ export class NetworkMap {
       <div class="radar-top-controls">
         <div class="radar-filters font-mono" role="group" aria-label="Flight Route Filter">
           <span class="filter-label">ROUTE VECTORS:</span>
-          <button type="button" class="radar-filter-btn active" data-filter="all">
+          <button type="button" class="radar-filter-btn active" data-filter="all" aria-pressed="true" aria-label="Show all 70 flight routes">
             <span class="filter-dot dot-all" aria-hidden="true"></span>
             <span>ALL ROUTES</span>
           </button>
-          <button type="button" class="radar-filter-btn btn-warn" data-filter="delayed">
+          <button type="button" class="radar-filter-btn btn-warn" data-filter="delayed" aria-pressed="false" aria-label="Show delayed flight routes only">
             <span class="filter-dot dot-warn" aria-hidden="true"></span>
             <span>DELAYED ONLY</span>
           </button>
-          <button type="button" class="radar-filter-btn btn-alert" data-filter="cancelled">
+          <button type="button" class="radar-filter-btn btn-alert" data-filter="cancelled" aria-pressed="false" aria-label="Show cancelled flight routes only">
             <span class="filter-dot dot-alert" aria-hidden="true"></span>
             <span>CANCELLED ONLY</span>
           </button>
         </div>
-        <div class="radar-coords-readout font-mono" id="radar-live-coords">
+        <div class="radar-coords-readout font-mono" id="radar-live-coords" role="note" aria-label="Airspace radar coordinates: 82.5 degrees East, 22.5 degrees North">
           <span class="coords-beacon" aria-hidden="true"></span>
           CENTRAL RADAR &bull; 82.5&deg;E / 22.5&deg;N
         </div>
       </div>
 
-      <svg class="radar-viewport-svg" viewBox="0 0 ${VB_WIDTH} ${VB_HEIGHT}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Tactical Radar Map of Indian Airspace">
+      <svg class="radar-viewport-svg" viewBox="0 0 ${VB_WIDTH} ${VB_HEIGHT}" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="radar-map-title radar-map-desc">
+        <title id="radar-map-title">Tactical Radar Map of Indian Airspace</title>
+        <desc id="radar-map-desc">Interactive geographic radar view of Indian airspace showing 16 major hub airports, flight routes, active aircraft, and FIR sectors.</desc>
         <defs>
           <!-- Tactical Radar Atmospheric Gradient -->
           <radialGradient id="airspace-bg" cx="50%" cy="46%" r="65%">
@@ -186,8 +188,12 @@ export class NetworkMap {
     const filterBtns = this.container.querySelectorAll('.radar-filter-btn');
     filterBtns.forEach(btn => {
       btn.addEventListener('click', () => {
-        filterBtns.forEach(b => b.classList.remove('active'));
+        filterBtns.forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
         this.activeFilter = btn.dataset.filter;
         this.updateHighlights();
       });

@@ -20,47 +20,61 @@ export class GanttTimeline {
 
   initStructure() {
     this.container.innerHTML = `
-      <div class="gantt-root">
+      <div class="gantt-root" role="region" aria-labelledby="heading-gantt">
         <!-- Gantt Controls Header -->
         <div class="gantt-top-bar">
           <div class="gantt-bar-title">
             <span class="gantt-deck-beacon" aria-hidden="true"></span>
-            <span class="bar-title-text">Rotational Fleet Schedule</span>
+            <h2 class="bar-title-text" id="heading-gantt">Rotational Fleet Schedule</h2>
             <span class="bar-title-sub font-mono">05:00 &ndash; 24:00 IST &bull; 18 Aircraft Tails</span>
           </div>
 
-          <div class="gantt-transport-controls">
-            <button type="button" class="transport-btn" id="gantt-btn-rewind" title="Rewind to 05:00">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+          <div class="gantt-transport-controls" role="group" aria-label="Timeline Playback & Transport Controls">
+            <button type="button" class="transport-btn" id="gantt-btn-rewind" title="Rewind to 05:00" aria-label="Rewind timeline to 05:00 IST">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
             </button>
-            <button type="button" class="transport-btn" id="gantt-btn-step-back" title="Step Back 15 min">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M14 18V6l-7 6 7 6z"/></svg>
+            <button type="button" class="transport-btn" id="gantt-btn-step-back" title="Step Back 15 min" aria-label="Step back 15 minutes">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M14 18V6l-7 6 7 6z"/></svg>
             </button>
-            <button type="button" class="transport-btn transport-play-btn font-mono" id="gantt-btn-play" title="Toggle Play / Pause Simulation">
-              <svg class="play-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <button type="button" class="transport-btn transport-play-btn font-mono" id="gantt-btn-play" title="Toggle Play / Pause Simulation" aria-label="Play timeline simulation" aria-pressed="false">
+              <svg class="play-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               <span id="gantt-play-label">Play</span>
             </button>
-            <button type="button" class="transport-btn" id="gantt-btn-step-fwd" title="Step Forward 15 min">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 18V6l7 6-7 6z"/></svg>
+            <button type="button" class="transport-btn" id="gantt-btn-step-fwd" title="Step Forward 15 min" aria-label="Step forward 15 minutes">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 18V6l7 6-7 6z"/></svg>
             </button>
 
             <!-- Time Scrubber Slider -->
             <div class="scrub-container">
-              <input type="range" class="timeline-range" id="gantt-time-slider" min="${T_START}" max="${T_END}" step="5" value="${T_END}" aria-label="Timeline Scrubber" />
-              <div class="time-readout-box font-mono">
+              <input
+                type="range"
+                class="timeline-range"
+                id="gantt-time-slider"
+                min="${T_START}"
+                max="${T_END}"
+                step="5"
+                value="${T_END}"
+                role="slider"
+                aria-label="Timeline time scrubber"
+                aria-valuemin="${T_START}"
+                aria-valuemax="${T_END}"
+                aria-valuenow="${T_END}"
+                aria-valuetext="24:00 IST"
+              />
+              <div class="time-readout-box font-mono" aria-live="polite">
                 <span class="readout-clock" id="gantt-digital-clock">24:00 IST</span>
               </div>
             </div>
 
             <!-- Speed selector -->
             <div class="speed-selector font-mono" role="group" aria-label="Playback Velocity">
-              <button type="button" class="speed-chip" data-speed="1">1x</button>
-              <button type="button" class="speed-chip active" data-speed="2">2x</button>
-              <button type="button" class="speed-chip" data-speed="5">5x</button>
-              <button type="button" class="speed-chip" data-speed="10">10x</button>
+              <button type="button" class="speed-chip" data-speed="1" aria-label="Speed 1x" aria-pressed="false">1x</button>
+              <button type="button" class="speed-chip active" data-speed="2" aria-label="Speed 2x" aria-pressed="true">2x</button>
+              <button type="button" class="speed-chip" data-speed="5" aria-label="Speed 5x" aria-pressed="false">5x</button>
+              <button type="button" class="speed-chip" data-speed="10" aria-label="Speed 10x" aria-pressed="false">10x</button>
             </div>
 
-            <button type="button" class="btn btn-xs btn-deck-action font-mono" id="gantt-btn-reveal-all" title="Snap to end-of-day cumulative state">Full Day</button>
+            <button type="button" class="btn btn-xs btn-deck-action font-mono" id="gantt-btn-reveal-all" title="Snap to end-of-day cumulative state" aria-label="Show full day cumulative results">Full Day</button>
           </div>
         </div>
 
@@ -261,6 +275,13 @@ export class GanttTimeline {
         e.stopPropagation();
         state.selectFlight(fid);
       });
+      bar.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          state.selectFlight(fid);
+        }
+      });
     });
 
     this.onTimeUpdated(state.currentTime);
@@ -328,9 +349,23 @@ export class GanttTimeline {
       `;
     }
 
+    const a11yStatus = isCancelled ? 'Cancelled' : (isDelayed ? `Delayed by ${f.arrDelay} minutes` : 'On Time');
+    const a11yLabel = `Flight ${f.flight_id}, ${f.origin} to ${f.destination}, scheduled ${toHHMM(sd)} to ${toHHMM(sa)}, status ${a11yStatus}`;
+
     return `
-      <div class="leg-bar-group" data-flight-id="${f.flight_id}" data-sched-dep="${sd}" data-sched-arr="${sa}" data-dep="${dep || sd}" data-arr="${arr || sa}" data-status="${f.status}">
-        <div class="bar-scheduled-outline" style="left: ${schedLeft}%; width: ${schedWidth}%;" title="Scheduled ${toHHMM(sd)} - ${toHHMM(sa)}"></div>
+      <div
+        class="leg-bar-group"
+        data-flight-id="${f.flight_id}"
+        data-sched-dep="${sd}"
+        data-sched-arr="${sa}"
+        data-dep="${dep || sd}"
+        data-arr="${arr || sa}"
+        data-status="${f.status}"
+        tabindex="0"
+        role="button"
+        aria-label="${a11yLabel}"
+      >
+        <div class="bar-scheduled-outline" style="left: ${schedLeft}%; width: ${schedWidth}%;" title="Scheduled ${toHHMM(sd)} - ${toHHMM(sa)}" aria-hidden="true"></div>
         ${actualBarHtml}
       </div>
     `;

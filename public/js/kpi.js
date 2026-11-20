@@ -1,19 +1,37 @@
+/**
+ * @fileoverview Network Impact KPI Panel for Domino Sky.
+ * Displays executive operational telemetry: Stranded Passengers (Hero),
+ * Delayed/Cancelled Flights, Missed Transfers, Crew Breaches, and Cumulative Delay.
+ *
+ * Adheres to WCAG 2.1 AAA accessibility and Google Clean Code standards.
+ */
+
 import { state } from './state.js';
 
 export class KpiPanel {
+  /**
+   * @param {HTMLElement} containerEl - DOM mount point.
+   */
   constructor(containerEl) {
+    if (!containerEl) throw new Error('KpiPanel requires a valid container element');
     this.container = containerEl;
     this.bindEvents();
   }
 
+  /**
+   * Binds to state changes.
+   */
   bindEvents() {
     state.on('simulation_updated', () => this.render());
     state.on('plan_toggled', () => this.render());
   }
 
+  /**
+   * Renders the executive telemetry deck.
+   */
   render() {
     if (!state.simulation || !state.simulation.summary) {
-      this.container.innerHTML = `<div class="kpi-empty font-mono">Awaiting simulation data...</div>`;
+      this.container.innerHTML = `<div class="kpi-empty font-mono" role="status">Awaiting simulation data...</div>`;
       return;
     }
 
@@ -29,11 +47,11 @@ export class KpiPanel {
     const hasImpact = s.strandedPax > 0 || s.cancelledFlights > 0 || s.delayedFlights > 0;
 
     this.container.innerHTML = `
-      <div class="kpi-deck">
+      <div class="kpi-deck" role="region" aria-labelledby="heading-kpi">
         <div class="card-header">
           <div class="card-header-left">
             <span class="card-icon-beacon ${hasImpact ? 'card-beacon-amber' : 'card-beacon-green'}" aria-hidden="true"></span>
-            <span class="card-title">Network Impact</span>
+            <h2 class="card-title" id="heading-kpi">Network Impact</h2>
           </div>
           <span class="card-chip font-mono ${isPlanApplied ? 'chip-applied' : 'chip-disrupted'}">
             ${isPlanApplied ? 'PLAN APPLIED' : (hasImpact ? 'DISRUPTED' : 'NOMINAL')}
@@ -41,16 +59,16 @@ export class KpiPanel {
         </div>
 
         <!-- 1. HERO METRIC: Stranded Passengers -->
-        <div class="metric-hero ${s.strandedPax > 0 ? 'metric-alert' : 'metric-nominal'}">
+        <div class="metric-hero ${s.strandedPax > 0 ? 'metric-alert' : 'metric-nominal'}" role="status" aria-label="${s.strandedPax} passengers stranded: ${s.strandedFromCancellations} via cancellations, ${s.strandedFromMissedConnections} via broken transfers">
           <div class="hero-top">
             <div class="hero-title-group">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                 <circle cx="9" cy="7" r="4"/>
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
                 <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
               </svg>
-              <span class="hero-label">Stranded Passengers</span>
+              <h3 class="hero-label">Stranded Passengers</h3>
             </div>
             <span class="hero-chip font-mono ${s.strandedPax > 0 ? 'hero-chip-alert' : 'hero-chip-ok'}">
               ${s.strandedPax > 0 ? 'Direct Impact' : 'Zero Disruption'}
@@ -74,7 +92,7 @@ export class KpiPanel {
         </div>
 
         <!-- 2. COMPACT SECONDARY METRICS: 2x2 Grid -->
-        <div class="kpi-quad">
+        <div class="kpi-quad" role="group" aria-label="Flight and Resource Impact Quad Deck">
           <div class="quad-card ${s.delayedFlights > 0 ? 'card-warn' : ''}">
             <div class="quad-header">
               <span class="quad-label">Delayed Flights</span>

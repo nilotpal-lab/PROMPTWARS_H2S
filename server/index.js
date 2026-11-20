@@ -1,3 +1,12 @@
+/**
+ * @fileoverview Domino Sky Network Operations Server.
+ * Exposes deterministic simulation endpoints, AI recovery dispatching,
+ * hardened security headers, rate limiting, and prototype pollution defenses.
+ *
+ * Core architectural invariant:
+ * engine.js is the sole source of truth for all simulation computations.
+ */
+
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
