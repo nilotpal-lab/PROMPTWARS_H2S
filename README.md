@@ -1,5 +1,12 @@
 # Domino Sky — Flight Disruption Cascade & Recovery Simulator
 
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Live%20Production-brightgreen?logo=vercel)](https://domino-sky-rho.vercel.app)
+[![Tests Passing](https://img.shields.io/badge/Tests-42%2F42%20Passing-success)](https://github.com/nilotpal-lab/PROMPTWARS_H2S)
+[![Deterministic Engine](https://img.shields.io/badge/Engine-100%25%20Deterministic-blue)](#)
+
+🚀 **Live Production URL:** [https://domino-sky-rho.vercel.app](https://domino-sky-rho.vercel.app)  
+🛰️ **Mirror Deployment:** [https://domino-sky-nilotpaldeb083-gmailcoms-projects.vercel.app](https://domino-sky-nilotpaldeb083-gmailcoms-projects.vercel.app)
+
 Domino Sky is an airline Network Operations Center (NOC) simulator that models cascading flight delays, broken passenger transfers, and crew duty limits across a 24-hour schedule. When any hub airport closes, the system computes delay propagation along each aircraft's flight chain using pure deterministic logic. An integrated AI recovery dispatcher recommends proactive cancellations and spare aircraft swaps to minimize stranded passengers.
 
 **Core Invariant:** Every delay, cancellation, passenger count, and crew duty figure is produced strictly by deterministic code (`engine.js`). The AI dispatcher writes operational prose using placeholders resolved directly against engine calculations—it is mathematically incapable of hallucinating numbers.
