@@ -1,3 +1,11 @@
+/**
+ * @fileoverview Tactical Airspace Radar Display for Indian Skies.
+ * Renders Survey-of-India compliant vector geometry, FIR boundaries,
+ * real-time flight arcs, active aircraft, and airport telemetry.
+ *
+ * Adheres to WCAG 2.1 AAA accessibility standards and Google clean code principles.
+ */
+
 import { state } from './state.js';
 import { toHHMM } from '/engine.js';
 import {
@@ -10,13 +18,25 @@ import {
   AIRSPACE_FIRS
 } from './india_geo.js';
 
+/** Radar layout and calculation constants */
+const RADAR_CENTER_LNG = 82.5;
+const RADAR_CENTER_LAT = 22.5;
+const TOOLTIP_OFFSET_PX = 12;
+const TOOLTIP_MARGIN_PX = 10;
+const MAX_CURVATURE_OFFSET = 46;
+const MIN_CURVATURE_OFFSET = 12;
+const CURVATURE_FACTOR = 0.14;
+
 /**
- * Tactical Airspace Radar Display for Indian Skies
- * Renders Survey-of-India compliant vector geometry, FIR boundaries,
- * real-time flight arcs, active aircraft, and airport telemetry.
+ * Tactical Airspace Radar Display for Indian Skies.
  */
 export class NetworkMap {
+  /**
+   * @param {HTMLElement} containerEl - DOM mount point.
+   * @param {HTMLElement} tooltipEl - Tooltip floating overlay element.
+   */
   constructor(containerEl, tooltipEl) {
+    if (!containerEl) throw new Error('NetworkMap requires a valid container element');
     this.container = containerEl;
     this.tooltip = tooltipEl;
     this.svg = null;
@@ -31,6 +51,10 @@ export class NetworkMap {
     this.bindEvents();
   }
 
+  /**
+   * Initializes SVG canvas, background radar grids, FIR sectors, and filters.
+   * @returns {void}
+   */
   initSvg() {
     this.container.innerHTML = `
       <div class="radar-top-controls">
@@ -51,7 +75,7 @@ export class NetworkMap {
         </div>
         <div class="radar-coords-readout font-mono" id="radar-live-coords" role="note" aria-label="Airspace radar coordinates: 82.5 degrees East, 22.5 degrees North">
           <span class="coords-beacon" aria-hidden="true"></span>
-          CENTRAL RADAR &bull; 82.5&deg;E / 22.5&deg;N
+          CENTRAL RADAR &bull; ${RADAR_CENTER_LNG}&deg;E / ${RADAR_CENTER_LAT}&deg;N
         </div>
       </div>
 
@@ -94,14 +118,14 @@ export class NetworkMap {
         <!-- Geographical Coordinate Grid (Graticule) -->
         <g class="geo-grid" opacity="0.18">
           ${[10, 15, 20, 25, 30, 35].map(lat => {
-            const y = project(lat, 82.5).y;
+            const y = project(lat, RADAR_CENTER_LNG).y;
             return `
               <line x1="20" y1="${y}" x2="${VB_WIDTH - 20}" y2="${y}" stroke="#38bdf8" stroke-dasharray="2,8" />
               <text x="24" y="${y - 4}" fill="#64748b" font-size="8.5" font-family="monospace">${lat}°N</text>
             `;
           }).join('')}
           ${[70, 75, 80, 85, 90, 95].map(lng => {
-            const x = project(22.5, lng).x;
+            const x = project(RADAR_CENTER_LAT, lng).x;
             return `
               <line x1="${x}" y1="20" x2="${x}" y2="${VB_HEIGHT - 20}" stroke="#38bdf8" stroke-dasharray="2,8" />
               <text x="${x + 4}" y="${VB_HEIGHT - 24}" fill="#64748b" font-size="8.5" font-family="monospace">${lng}°E</text>
@@ -146,28 +170,45 @@ export class NetworkMap {
     `;
 
     this.svg = this.container.querySelector('svg');
-    this.firsGroup = this.svg.querySelector('.firs-layer');
-    this.arcsGroup = this.svg.querySelector('.arcs-layer');
-    this.planesGroup = this.svg.querySelector('.planes-layer');
-    this.airportsGroup = this.svg.querySelector('.airports-layer');
+    if (this.svg) {
+      this.firsGroup = this.svg.querySelector('.firs-layer');
+      this.arcsGroup = this.svg.querySelector('.arcs-layer');
+      this.planesGroup = this.svg.querySelector('.planes-layer');
+      this.airportsGroup = this.svg.querySelector('.airports-layer');
+    }
 
     this.renderFirs();
     this.attachFilterEvents();
   }
 
+  /**
+   * Converts polygon coordinates to an SVG closed path string.
+   * @param {Array<[number, number]>} coords - Latitude/longitude coordinate pairs.
+   * @returns {string} SVG path string.
+   */
   buildPolyPath(coords) {
     if (!coords || coords.length === 0) return '';
     const points = coords.map(([lat, lng]) => project(lat, lng));
     return 'M ' + points.map(p => `${p.x} ${p.y}`).join(' L ') + ' Z';
   }
 
+  /**
+   * Converts polyline coordinates to an SVG line path string.
+   * @param {Array<[number, number]>} coords - Latitude/longitude coordinate pairs.
+   * @returns {string} SVG path string.
+   */
   buildLinePath(coords) {
     if (!coords || coords.length === 0) return '';
     const points = coords.map(([lat, lng]) => project(lat, lng));
     return 'M ' + points.map(p => `${p.x} ${p.y}`).join(' L ');
   }
 
+  /**
+   * Renders FIR sector boundaries and ICAO callsign labels.
+   * @returns {void}
+   */
   renderFirs() {
+    if (!this.firsGroup) return;
     let html = '';
     for (const fir of AIRSPACE_FIRS) {
       const lineD = this.buildLinePath(fir.boundary);
@@ -184,6 +225,10 @@ export class NetworkMap {
     this.firsGroup.innerHTML = html;
   }
 
+  /**
+   * Attaches route filter click events.
+   * @returns {void}
+   */
   attachFilterEvents() {
     const filterBtns = this.container.querySelectorAll('.radar-filter-btn');
     filterBtns.forEach(btn => {
@@ -194,12 +239,16 @@ export class NetworkMap {
         });
         btn.classList.add('active');
         btn.setAttribute('aria-pressed', 'true');
-        this.activeFilter = btn.dataset.filter;
+        this.activeFilter = btn.dataset.filter || 'all';
         this.updateHighlights();
       });
     });
   }
 
+  /**
+   * Binds global state updates.
+   * @returns {void}
+   */
   bindEvents() {
     state.on('simulation_updated', () => this.render());
     state.on('flight_selected', () => this.updateHighlights());
@@ -207,6 +256,10 @@ export class NetworkMap {
     state.on('time_updated', () => this.renderPlanes());
   }
 
+  /**
+   * Renders radar elements on simulation update.
+   * @returns {void}
+   */
   render() {
     if (!state.network || !state.simulation) return;
 
@@ -220,8 +273,13 @@ export class NetworkMap {
     this.updateHighlights();
   }
 
+  /**
+   * Renders parabolic flight trajectory arcs across the network.
+   * @returns {void}
+   */
   renderArcs() {
-    const flights = state.simulation.flights;
+    if (!this.arcsGroup) return;
+    const flights = state.simulation.flights || [];
 
     let html = '';
     for (const f of flights) {
@@ -240,7 +298,7 @@ export class NetworkMap {
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
 
-      const offset = Math.min(46, Math.max(12, dist * 0.14));
+      const offset = Math.min(MAX_CURVATURE_OFFSET, Math.max(MIN_CURVATURE_OFFSET, dist * CURVATURE_FACTOR));
       const cx = Math.round(mx + nx * offset);
       const cy = Math.round(my + ny * offset);
 
@@ -255,12 +313,12 @@ export class NetworkMap {
         strokeColor = '#f59e0b';
       } else if (f.status === 'cancelled') {
         strokeClass = 'arc-cancelled';
-        strokeColor = '#f43f5e';
+        strokeColor = '#ff7588';
         dashAttr = 'stroke-dasharray="4,4"';
       }
 
       html += `
-        <g class="trajectory-group" data-flight-id="${f.flight_id}" data-origin="${f.origin}" data-destination="${f.destination}" data-status="${f.status}">
+        <g class="trajectory-group" data-flight-id="${f.flight_id}" data-origin="${f.origin}" data-destination="${f.destination}" data-status="${f.status}" tabindex="0" role="button" aria-label="Flight ${f.flight_id}: ${f.origin} to ${f.destination}, ${f.status}">
           <path class="trajectory-hitbox" d="${pathD}" fill="none" stroke="transparent" stroke-width="12" style="cursor: pointer;" />
           <path class="trajectory-line ${strokeClass}" id="arc-${f.flight_id}" d="${pathD}" fill="none" stroke="${strokeColor}" ${dashAttr} />
         </g>
@@ -272,9 +330,17 @@ export class NetworkMap {
     const groups = this.arcsGroup.querySelectorAll('.trajectory-group');
     groups.forEach(g => {
       const fid = g.getAttribute('data-flight-id');
+      if (!fid) return;
       g.addEventListener('click', (e) => {
         e.stopPropagation();
         state.selectFlight(fid);
+      });
+      g.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          state.selectFlight(fid);
+        }
       });
 
       g.addEventListener('mouseenter', (e) => this.showFlightTooltip(e, fid));
@@ -283,8 +349,13 @@ export class NetworkMap {
     });
   }
 
+  /**
+   * Renders airport hub markers and closed hazard zones.
+   * @returns {void}
+   */
   renderAirports() {
-    const airports = state.network.airports;
+    if (!this.airportsGroup) return;
+    const airports = state.network.airports || [];
     const closures = state.simulation.closures || [];
     const closedMap = new Map(closures.map(c => [c.airport, c]));
 
@@ -301,38 +372,30 @@ export class NetworkMap {
       let labelDx = 9;
       let labelDy = 3.5;
       let textAnchor = 'start';
-      if (ap.id === 'BOM') {
+      if (ap.id === 'BOM' || ap.id === 'GAU' || ap.id === 'TRV') {
         labelDx = -10;
         labelDy = 3.5;
         textAnchor = 'end';
       } else if (ap.id === 'PNQ') {
         labelDx = 9;
         labelDy = 10;
-      } else if (ap.id === 'GAU') {
-        labelDx = -10;
-        labelDy = 3.5;
-        textAnchor = 'end';
-      } else if (ap.id === 'TRV') {
-        labelDx = -10;
-        labelDy = 3.5;
-        textAnchor = 'end';
       }
 
       html += `
-        <g class="hub-marker ${isClosed ? 'hub-closed' : ''} ${isMegaHub ? 'hub-megahub' : ''}" data-airport-id="${ap.id}" transform="translate(${pos.x}, ${pos.y})">
+        <g class="hub-marker ${isClosed ? 'hub-closed' : ''} ${isMegaHub ? 'hub-megahub' : ''}" data-airport-id="${ap.id}" transform="translate(${pos.x}, ${pos.y})" tabindex="0" role="button" aria-label="Airport ${ap.id}, ${ap.city}, ${ap.tier.replace('_', ' ')}${isClosed ? ', currently closed' : ''}">
           ${isClosed ? `
-            <circle class="hazard-wave wave-1" r="${r + 2}" stroke="#f43f5e" fill="none" />
-            <circle class="hazard-wave wave-2" r="${r + 2}" stroke="#f43f5e" fill="none" />
+            <circle class="hazard-wave wave-1" r="${r + 2}" stroke="#ff7588" fill="none" />
+            <circle class="hazard-wave wave-2" r="${r + 2}" stroke="#ff7588" fill="none" />
           ` : ''}
 
-          <circle class="hub-outer-ring" r="${r + 2.5}" fill="none" stroke="${isClosed ? '#f43f5e' : (isMegaHub ? '#38bdf8' : '#475569')}" stroke-width="1.0" />
-          <circle class="hub-core" r="${r}" fill="${isClosed ? '#f43f5e' : (isMegaHub ? '#0284c7' : '#1e293b')}" stroke="${isClosed ? '#fda4af' : '#38bdf8'}" stroke-width="1.2" />
+          <circle class="hub-outer-ring" r="${r + 2.5}" fill="none" stroke="${isClosed ? '#ff7588' : (isMegaHub ? '#38bdf8' : '#475569')}" stroke-width="1.0" />
+          <circle class="hub-core" r="${r}" fill="${isClosed ? '#ff7588' : (isMegaHub ? '#0284c7' : '#1e293b')}" stroke="${isClosed ? '#fda4af' : '#38bdf8'}" stroke-width="1.2" />
 
           <text class="hub-code-label font-mono" x="${labelDx}" y="${labelDy}" text-anchor="${textAnchor}" fill="${isClosed ? '#fecdd3' : '#f1f5f9'}">${ap.id}</text>
           
           ${isClosed ? `
             <g class="hazard-tag-wrap" transform="translate(${labelDx > 0 ? labelDx : labelDx - 54}, ${labelDy + 8})">
-              <rect x="0" y="0" width="54" height="13" rx="2" fill="#4c0519" stroke="#f43f5e" stroke-width="0.9" />
+              <rect x="0" y="0" width="54" height="13" rx="2" fill="#4c0519" stroke="#ff7588" stroke-width="0.9" />
               <text x="27" y="9.5" text-anchor="middle" fill="#fecdd3" font-size="8" font-weight="700" font-family="monospace">CLOSED</text>
             </g>
           ` : ''}
@@ -347,9 +410,17 @@ export class NetworkMap {
     const nodes = this.airportsGroup.querySelectorAll('.hub-marker');
     nodes.forEach(n => {
       const apId = n.getAttribute('data-airport-id');
+      if (!apId) return;
       n.addEventListener('click', (e) => {
         e.stopPropagation();
         state.selectAirport(apId);
+      });
+      n.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          state.selectAirport(apId);
+        }
       });
 
       n.addEventListener('mouseenter', (e) => this.showAirportTooltip(e, apId));
@@ -358,14 +429,19 @@ export class NetworkMap {
     });
   }
 
+  /**
+   * Renders active aircraft blips positioned along trajectory curves at current time.
+   * @returns {void}
+   */
   renderPlanes() {
+    if (!this.planesGroup) return;
     if (!state.simulation || state.revealAll) {
       this.planesGroup.innerHTML = '';
       return;
     }
 
     const t = state.currentTime;
-    const flights = state.simulation.flights;
+    const flights = state.simulation.flights || [];
     let html = '';
 
     for (const f of flights) {
@@ -386,7 +462,7 @@ export class NetworkMap {
         const ny = dx / dist;
         const mx = (p1.x + p2.x) / 2;
         const my = (p1.y + p2.y) / 2;
-        const offset = Math.min(46, Math.max(12, dist * 0.14));
+        const offset = Math.min(MAX_CURVATURE_OFFSET, Math.max(MIN_CURVATURE_OFFSET, dist * CURVATURE_FACTOR));
         const cx = mx + nx * offset;
         const cy = my + ny * offset;
 
@@ -417,7 +493,12 @@ export class NetworkMap {
     this.planesGroup.innerHTML = html;
   }
 
+  /**
+   * Updates visual highlights and opacity based on selection state and route filter.
+   * @returns {void}
+   */
   updateHighlights() {
+    if (!this.arcsGroup || !this.airportsGroup) return;
     const selectedFid = state.selectedFlightId;
     const selectedAid = state.selectedAirportId;
     const t = state.currentTime;
@@ -431,6 +512,7 @@ export class NetworkMap {
       const dest = g.getAttribute('data-destination');
       const status = g.getAttribute('data-status');
       const line = g.querySelector('.trajectory-line');
+      if (!line) return;
 
       // Check route filter
       if (filter === 'delayed' && status !== 'delayed') {
@@ -444,11 +526,11 @@ export class NetworkMap {
       g.style.display = '';
 
       const isFlightSelected = selectedFid === fid;
-      const isAirportRelated = selectedAid && (orig === selectedAid || dest === selectedAid);
+      const isAirportRelated = Boolean(selectedAid && (orig === selectedAid || dest === selectedAid));
 
       let isFuture = false;
       if (!revealAll && state.simulation) {
-        const flightData = state.simulation.flights.find(x => x.flight_id === fid);
+        const flightData = (state.simulation.flights || []).find(x => x.flight_id === fid);
         if (flightData && flightData.schedDep > t && (flightData.dep == null || flightData.dep > t)) {
           isFuture = true;
         }
@@ -460,7 +542,7 @@ export class NetworkMap {
           line.style.opacity = '1.0';
           line.style.strokeWidth = '3.0px';
           line.setAttribute('filter', 'url(#track-glow)');
-          g.parentNode.appendChild(g);
+          if (g.parentNode) g.parentNode.appendChild(g);
         } else {
           g.classList.remove('selected');
           line.style.opacity = '0.08';
@@ -501,9 +583,15 @@ export class NetworkMap {
     });
   }
 
+  /**
+   * Surfaces a high-precision tooltip for an inspected flight arc.
+   * @param {MouseEvent} e - Mouse event.
+   * @param {string} flightId - Flight ID.
+   * @returns {void}
+   */
   showFlightTooltip(e, flightId) {
-    if (!state.simulation) return;
-    const f = state.simulation.flights.find(x => x.flight_id === flightId);
+    if (!state.simulation || !this.tooltip) return;
+    const f = (state.simulation.flights || []).find(x => x.flight_id === flightId);
     if (!f) return;
 
     let statusPill = `<span class="tip-pill pill-nominal">ON TIME</span>`;
@@ -535,12 +623,18 @@ export class NetworkMap {
     this.moveTooltip(e);
   }
 
+  /**
+   * Surfaces a high-precision tooltip for an inspected airport hub.
+   * @param {MouseEvent} e - Mouse event.
+   * @param {string} airportId - Airport code.
+   * @returns {void}
+   */
   showAirportTooltip(e, airportId) {
-    if (!state.network || !state.simulation) return;
-    const ap = state.network.airports.find(x => x.id === airportId);
+    if (!state.network || !state.simulation || !this.tooltip) return;
+    const ap = (state.network.airports || []).find(x => x.id === airportId);
     if (!ap) return;
 
-    const flights = state.simulation.flights;
+    const flights = state.simulation.flights || [];
     const depFlights = flights.filter(f => f.origin === airportId);
     const arrFlights = flights.filter(f => f.destination === airportId);
     const closures = state.simulation.closures || [];
@@ -567,19 +661,30 @@ export class NetworkMap {
     this.moveTooltip(e);
   }
 
+  /**
+   * Repositions floating tooltip beside cursor with viewport collision avoidance.
+   * @param {MouseEvent} e - Mouse event.
+   * @returns {void}
+   */
   moveTooltip(e) {
-    const pad = 12;
-    let x = e.clientX + pad;
-    let y = e.clientY + pad;
+    if (!this.tooltip) return;
+    let x = e.clientX + TOOLTIP_OFFSET_PX;
+    let y = e.clientY + TOOLTIP_OFFSET_PX;
     const w = this.tooltip.offsetWidth;
     const h = this.tooltip.offsetHeight;
-    if (x + w > window.innerWidth - 10) x = e.clientX - w - pad;
-    if (y + h > window.innerHeight - 10) y = e.clientY - h - pad;
+    if (x + w > window.innerWidth - TOOLTIP_MARGIN_PX) x = e.clientX - w - TOOLTIP_OFFSET_PX;
+    if (y + h > window.innerHeight - TOOLTIP_MARGIN_PX) y = e.clientY - h - TOOLTIP_OFFSET_PX;
     this.tooltip.style.left = `${x}px`;
     this.tooltip.style.top = `${y}px`;
   }
 
+  /**
+   * Hides floating tooltip on mouse exit.
+   * @returns {void}
+   */
   hideTooltip() {
-    this.tooltip.style.display = 'none';
+    if (this.tooltip) {
+      this.tooltip.style.display = 'none';
+    }
   }
 }

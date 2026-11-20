@@ -1,23 +1,47 @@
+/**
+ * @fileoverview Rotational Fleet Gantt Timeline Deck for Domino Sky.
+ * Renders aircraft rotations, scheduled vs actual flight execution bars,
+ * delay brackets, spare positioning ferry flights, and time-scrubbed interactive cursors.
+ *
+ * Adheres to WCAG 2.1 AAA accessibility standards and Google clean code principles.
+ */
+
 import { state } from './state.js';
 import { toHHMM } from '/engine.js';
 
-const T_START = 300; // 05:00
-const T_END = 1440;  // 24:00
+/** Timeline temporal bounds in minutes from 00:00 */
+const T_START = 300; // 05:00 IST
+const T_END = 1440;  // 24:00 IST
 const T_TOTAL = T_END - T_START; // 1140 minutes
+const TIME_STEP_HOUR = 60;
+const TIME_STEP_SCRUB = 15;
+const OPERATIONAL_FLEET_SIZE = 16;
 
+/**
+ * GanttTimeline coordinates rotational timeline rendering, playback scrubbing,
+ * and flight leg selection.
+ */
 export class GanttTimeline {
+  /**
+   * @param {HTMLElement} containerEl - DOM container mount point.
+   */
   constructor(containerEl) {
+    if (!containerEl) throw new Error('GanttTimeline requires a valid container element');
     this.container = containerEl;
     this.gridEl = null;
     this.cursorLineEl = null;
     this.clockEl = null;
     this.playBtnEl = null;
     this.sliderEl = null;
-    
+
     this.initStructure();
     this.bindEvents();
   }
 
+  /**
+   * Initializes timeline DOM skeleton and transport controls.
+   * @returns {void}
+   */
   initStructure() {
     this.container.innerHTML = `
       <div class="gantt-root" role="region" aria-labelledby="heading-gantt">
@@ -125,10 +149,15 @@ export class GanttTimeline {
     this.attachDomHandlers();
   }
 
+  /**
+   * Generates hour markers along horizontal time axis.
+   * @returns {void}
+   */
   renderTimeAxis() {
     const axisEl = this.container.querySelector('#gantt-time-axis');
+    if (!axisEl) return;
     let html = '';
-    for (let m = T_START; m <= T_END; m += 60) {
+    for (let m = T_START; m <= T_END; m += TIME_STEP_HOUR) {
       const pct = ((m - T_START) / T_TOTAL) * 100;
       html += `
         <div class="axis-hour-tick" style="left: ${pct}%;">
@@ -140,46 +169,77 @@ export class GanttTimeline {
     axisEl.innerHTML = html;
   }
 
+  /**
+   * Attaches click and transport event handlers.
+   * @returns {void}
+   */
   attachDomHandlers() {
-    this.playBtnEl.addEventListener('click', () => {
-      if (state.isPlaying) state.stopPlayback();
-      else state.startPlayback();
-    });
+    if (this.playBtnEl) {
+      this.playBtnEl.addEventListener('click', () => {
+        if (state.isPlaying) state.stopPlayback();
+        else state.startPlayback();
+      });
+    }
 
-    this.container.querySelector('#gantt-btn-rewind').addEventListener('click', () => {
-      state.stopPlayback();
-      state.setCurrentTime(T_START, false);
-    });
+    const rewindBtn = this.container.querySelector('#gantt-btn-rewind');
+    if (rewindBtn) {
+      rewindBtn.addEventListener('click', () => {
+        state.stopPlayback();
+        state.setCurrentTime(T_START, false);
+      });
+    }
 
-    this.container.querySelector('#gantt-btn-step-back').addEventListener('click', () => {
-      state.stopPlayback();
-      state.setCurrentTime(state.currentTime - 15, false);
-    });
-    this.container.querySelector('#gantt-btn-step-fwd').addEventListener('click', () => {
-      state.stopPlayback();
-      state.setCurrentTime(state.currentTime + 15, false);
-    });
+    const stepBackBtn = this.container.querySelector('#gantt-btn-step-back');
+    if (stepBackBtn) {
+      stepBackBtn.addEventListener('click', () => {
+        state.stopPlayback();
+        state.setCurrentTime(state.currentTime - TIME_STEP_SCRUB, false);
+      });
+    }
 
-    this.sliderEl.addEventListener('input', (e) => {
-      state.stopPlayback();
-      state.setCurrentTime(Number(e.target.value), false);
-    });
+    const stepFwdBtn = this.container.querySelector('#gantt-btn-step-fwd');
+    if (stepFwdBtn) {
+      stepFwdBtn.addEventListener('click', () => {
+        state.stopPlayback();
+        state.setCurrentTime(state.currentTime + TIME_STEP_SCRUB, false);
+      });
+    }
 
-    this.container.querySelector('#gantt-btn-reveal-all').addEventListener('click', () => {
-      state.stopPlayback();
-      state.setCurrentTime(T_END, true);
-    });
+    if (this.sliderEl) {
+      this.sliderEl.addEventListener('input', (e) => {
+        state.stopPlayback();
+        const target = /** @type {HTMLInputElement} */ (e.target);
+        state.setCurrentTime(Number(target.value), false);
+      });
+    }
+
+    const revealAllBtn = this.container.querySelector('#gantt-btn-reveal-all');
+    if (revealAllBtn) {
+      revealAllBtn.addEventListener('click', () => {
+        state.stopPlayback();
+        state.setCurrentTime(T_END, true);
+      });
+    }
 
     const speedBtns = this.container.querySelectorAll('.speed-chip');
     speedBtns.forEach(btn => {
       btn.addEventListener('click', () => {
-        speedBtns.forEach(b => b.classList.remove('active'));
+        speedBtns.forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
         btn.classList.add('active');
-        state.setSpeed(btn.getAttribute('data-speed'));
+        btn.setAttribute('aria-pressed', 'true');
+        const speed = btn.getAttribute('data-speed');
+        if (speed) state.setSpeed(speed);
       });
     });
   }
 
+  /**
+   * Binds global state updates.
+   * @returns {void}
+   */
   bindEvents() {
     state.on('simulation_updated', () => this.render());
     state.on('flight_selected', () => this.updateSelection());
@@ -187,30 +247,47 @@ export class GanttTimeline {
     state.on('playback_state', (data) => this.onPlaybackUpdated(data));
   }
 
+  /**
+   * Updates play/pause button state.
+   * @param {{isPlaying: boolean, speed: number}} data - Playback state payload.
+   * @returns {void}
+   */
   onPlaybackUpdated(data) {
     const label = this.container.querySelector('#gantt-play-label');
+    if (!label || !this.playBtnEl) return;
     if (data.isPlaying) {
-      label.innerText = 'Pause';
+      label.textContent = 'Pause';
       this.playBtnEl.classList.add('playing');
+      this.playBtnEl.setAttribute('aria-pressed', 'true');
     } else {
-      label.innerText = 'Play';
+      label.textContent = 'Play';
       this.playBtnEl.classList.remove('playing');
+      this.playBtnEl.setAttribute('aria-pressed', 'false');
     }
   }
 
+  /**
+   * Synchronizes timeline scrubber cursor and readouts with current time.
+   * @param {number|{time: number}} data - Time update payload.
+   * @returns {void}
+   */
   onTimeUpdated(data) {
-    const t = typeof data === 'object' ? data.time : data;
-    this.sliderEl.value = t;
-    this.clockEl.innerText = `${toHHMM(t)} IST`;
-    
+    const t = typeof data === 'object' && data !== null ? data.time : Number(data);
+    if (this.sliderEl) this.sliderEl.value = String(t);
+    if (this.clockEl) this.clockEl.textContent = `${toHHMM(t)} IST`;
+
     const pct = Math.max(0, Math.min(100, ((t - T_START) / T_TOTAL) * 100));
-    this.cursorLineEl.style.left = `${pct}%`;
+    if (this.cursorLineEl) this.cursorLineEl.style.left = `${pct}%`;
     const cursorTag = this.container.querySelector('#cursor-tag');
-    if (cursorTag) cursorTag.innerText = toHHMM(t);
+    if (cursorTag) cursorTag.textContent = toHHMM(t);
 
     this.updateFlightVisibilities();
   }
 
+  /**
+   * Renders the complete Gantt deck with aircraft tails and flight bars.
+   * @returns {void}
+   */
   render() {
     if (!state.network || !state.simulation) return;
 
@@ -218,19 +295,20 @@ export class GanttTimeline {
 
     const tailsCol = this.container.querySelector('#gantt-tails-col');
     const rowsContainer = this.container.querySelector('#gantt-rows');
+    if (!tailsCol || !rowsContainer) return;
 
     const operationalTails = [];
-    for (let i = 1; i <= 16; i++) {
+    for (let i = 1; i <= OPERATIONAL_FLEET_SIZE; i++) {
       operationalTails.push(`VT-DS${String(i).padStart(2, '0')}`);
     }
-    const spareTails = state.network.spare_aircraft.map(s => s.tail_id);
+    const spareTails = (state.network.spare_aircraft || []).map(s => s.tail_id);
     const allTails = [...operationalTails, ...spareTails];
 
     let tailsHtml = '';
     for (const tail of allTails) {
       const isSpare = spareTails.includes(tail);
       const spareObj = isSpare ? state.network.spare_aircraft.find(s => s.tail_id === tail) : null;
-      const baseLabel = isSpare ? `Spare ${spareObj.base}` : 'Fleet';
+      const baseLabel = isSpare && spareObj ? `Spare ${spareObj.base}` : 'Fleet';
 
       tailsHtml += `
         <div class="tail-item ${isSpare ? 'tail-is-spare' : ''}" data-tail="${tail}">
@@ -241,7 +319,7 @@ export class GanttTimeline {
     }
     tailsCol.innerHTML = tailsHtml;
 
-    const flights = state.simulation.flights;
+    const flights = state.simulation.flights || [];
     const flightsByTail = {};
     for (const tail of allTails) flightsByTail[tail] = [];
 
@@ -271,6 +349,7 @@ export class GanttTimeline {
     const bars = rowsContainer.querySelectorAll('.leg-bar-group');
     bars.forEach(bar => {
       const fid = bar.getAttribute('data-flight-id');
+      if (!fid) return;
       bar.addEventListener('click', (e) => {
         e.stopPropagation();
         state.selectFlight(fid);
@@ -288,6 +367,11 @@ export class GanttTimeline {
     this.updateSelection();
   }
 
+  /**
+   * Generates markup for an individual scheduled and executed flight leg bar.
+   * @param {Object} f - Flight record from simulation engine.
+   * @returns {string} HTML markup.
+   */
   renderFlightBar(f) {
     const sd = f.schedDep;
     const sa = f.schedArr;
@@ -299,7 +383,7 @@ export class GanttTimeline {
 
     const isCancelled = f.status === 'cancelled';
     const isDelayed = f.status === 'delayed';
-    const isSwap = !!f.swap;
+    const isSwap = Boolean(f.swap);
 
     let actualBarHtml = '';
     let delayLineHtml = '';
@@ -323,7 +407,7 @@ export class GanttTimeline {
       }
 
       let ferryHtml = '';
-      if (isSwap && f.swap.ferryMin > 0 && f.swap.spare === f.aircraft) {
+      if (isSwap && f.swap && f.swap.ferryMin > 0 && f.swap.spare === f.aircraft) {
         const ferryStart = Math.max(0, ((dep - f.swap.ferryMin - T_START) / T_TOTAL) * 100);
         const ferryWidth = Math.max(0.6, (f.swap.ferryMin / T_TOTAL) * 100);
         ferryHtml = `
@@ -371,8 +455,13 @@ export class GanttTimeline {
     `;
   }
 
+  /**
+   * Renders red shaded vertical bands indicating airport closures.
+   * @returns {void}
+   */
   renderClosureOverlay() {
     const overlayEl = this.container.querySelector('#gantt-closure-overlay');
+    if (!overlayEl) return;
     const closures = state.simulation.closures || [];
     if (!closures.length) {
       overlayEl.innerHTML = '';
@@ -381,8 +470,8 @@ export class GanttTimeline {
 
     let html = '';
     for (const c of closures) {
-      const s = typeof c.start === 'string' ? (Number(c.start.split(':')[0]) * 60 + Number(c.start.split(':')[1])) : c.start;
-      const e = typeof c.end === 'string' ? (Number(c.end.split(':')[0]) * 60 + Number(c.end.split(':')[1])) : c.end;
+      const s = typeof c.start === 'string' ? (Number(c.start.split(':')[0]) * TIME_STEP_HOUR + Number(c.start.split(':')[1])) : c.start;
+      const e = typeof c.end === 'string' ? (Number(c.end.split(':')[0]) * TIME_STEP_HOUR + Number(c.end.split(':')[1])) : c.end;
 
       const left = Math.max(0, ((s - T_START) / T_TOTAL) * 100);
       const width = Math.max(0.5, ((e - s) / T_TOTAL) * 100);
@@ -396,6 +485,10 @@ export class GanttTimeline {
     overlayEl.innerHTML = html;
   }
 
+  /**
+   * Updates opacity of flight bars according to current simulation playback clock.
+   * @returns {void}
+   */
   updateFlightVisibilities() {
     const t = state.currentTime;
     const revealAll = state.revealAll;
@@ -440,6 +533,10 @@ export class GanttTimeline {
     });
   }
 
+  /**
+   * Highlights rotational row and flight bar corresponding to selected flight.
+   * @returns {void}
+   */
   updateSelection() {
     const fid = state.selectedFlightId;
     const rows = this.container.querySelectorAll('.rotation-row');
@@ -454,8 +551,8 @@ export class GanttTimeline {
     });
 
     rows.forEach(row => {
-      const hasSelected = !!row.querySelector(`.leg-bar-group[data-flight-id="${fid}"]`);
-      if (hasSelected && fid) {
+      const hasSelected = Boolean(fid && row.querySelector(`.leg-bar-group[data-flight-id="${fid}"]`));
+      if (hasSelected) {
         row.classList.add('row-selected');
       } else {
         row.classList.remove('row-selected');

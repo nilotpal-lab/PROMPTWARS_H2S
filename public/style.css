@@ -24,18 +24,18 @@
   --text-bright: #ffffff;
   --text-primary: #f1f5f9;
   --text-dim: #94a3b8;
-  --text-muted: #718096;
+  --text-muted: #a8b8cc;
 
-  /* Functional Aerospace Accents */
+  /* Functional Aerospace Accents (WCAG 2.1 AAA >= 7:1 Contrast on Dark Surfaces) */
   --color-cyan: #38bdf8;
   --color-cyan-glow: rgba(56, 189, 248, 0.15);
   --color-amber: #f59e0b;
   --color-amber-glow: rgba(245, 158, 11, 0.15);
-  --color-red: #f43f5e;
-  --color-red-glow: rgba(244, 63, 94, 0.15);
-  --color-green: #10b981;
-  --color-green-glow: rgba(16, 185, 129, 0.15);
-  --color-spare: #818cf8;
+  --color-red: #ff7588;
+  --color-red-glow: rgba(255, 117, 136, 0.15);
+  --color-green: #22c55e;
+  --color-green-glow: rgba(34, 197, 94, 0.15);
+  --color-spare: #a5b4fc;
 
   /* Font Stacks */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -544,6 +544,10 @@ body.ops-theme {
 .form-select:focus, .form-control:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+}
+.form-select:focus-visible, .form-control:focus-visible {
+  outline: 2px solid var(--color-cyan) !important;
+  outline-offset: 1px !important;
 }
 
 .time-control-stack {

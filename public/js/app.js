@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Main Application Bootstrap for Domino Sky.
+ * Orchestrates component lifecycle, initializes the central state store,
+ * and mounts interactive decks into DOM landmark containers.
+ */
+
 import { state } from './state.js';
 import { NetworkMap } from './map.js';
 import { GanttTimeline } from './gantt.js';
@@ -6,7 +12,11 @@ import { InspectorPanel } from './inspector.js';
 import { DispatcherPanel } from './dispatcher.js';
 import { ControlPanel } from './controls.js';
 
-window.addEventListener('DOMContentLoaded', async () => {
+/**
+ * Bootstraps all UI controller components and subscribes to state initialization.
+ * @returns {Promise<void>}
+ */
+async function initializeApp() {
   console.log('Initializing Domino Sky Airline Operations Center...');
 
   // Tooltip element
@@ -19,6 +29,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   const inspectorContainer = document.getElementById('inspector-container');
   const dispatcherContainer = document.getElementById('dispatcher-container');
   const controlsContainer = document.getElementById('controls-container');
+
+  if (!mapContainer || !ganttContainer || !kpiContainer || !inspectorContainer || !dispatcherContainer || !controlsContainer) {
+    throw new Error('Required DOM mount containers are missing from index.html');
+  }
 
   // Instantiate component controllers
   const controls = new ControlPanel(controlsContainer);
@@ -37,10 +51,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.error('Failed to initialize Domino Sky:', err);
     document.body.innerHTML = `
-      <div style="padding: 40px; color: #ef4444; font-family: monospace;">
+      <div style="padding: 40px; color: #ff7588; font-family: monospace; background: #060810; height: 100vh;">
         <h2>Initialization Error</h2>
         <p>${err.message}</p>
       </div>
     `;
   }
-});
+}
+
+window.addEventListener('DOMContentLoaded', initializeApp);

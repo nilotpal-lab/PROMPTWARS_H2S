@@ -8,6 +8,14 @@
 
 import { state } from './state.js';
 
+/** Telemetry layout constants */
+const MINUTES_PER_HOUR = 60;
+const TOTAL_CONNECTIONS_COUNT = 21;
+const TOTAL_CREWS_COUNT = 16;
+
+/**
+ * KpiPanel manages the executive impact deck showing high-priority network telemetry.
+ */
 export class KpiPanel {
   /**
    * @param {HTMLElement} containerEl - DOM mount point.
@@ -20,6 +28,7 @@ export class KpiPanel {
 
   /**
    * Binds to state changes.
+   * @returns {void}
    */
   bindEvents() {
     state.on('simulation_updated', () => this.render());
@@ -28,10 +37,18 @@ export class KpiPanel {
 
   /**
    * Renders the executive telemetry deck.
+   * @returns {void}
    */
   render() {
     if (!state.simulation || !state.simulation.summary) {
-      this.container.innerHTML = `<div class="kpi-empty font-mono" role="status">Awaiting simulation data...</div>`;
+      this.container.innerHTML = `
+        <div class="kpi-deck" role="region" aria-labelledby="heading-kpi">
+          <div class="card-header">
+            <h2 class="card-title" id="heading-kpi">Network Impact</h2>
+          </div>
+          <div class="kpi-empty font-mono" role="status">Awaiting simulation data...</div>
+        </div>
+      `;
       return;
     }
 
@@ -39,8 +56,8 @@ export class KpiPanel {
     const isPlanApplied = state.isPlanApplied;
 
     const formatHours = (m) => {
-      const h = Math.floor(m / 60);
-      const rem = m % 60;
+      const h = Math.floor(m / MINUTES_PER_HOUR);
+      const rem = m % MINUTES_PER_HOUR;
       return h > 0 ? `${h}h ${rem}m` : `${rem}m`;
     };
 
@@ -124,7 +141,7 @@ export class KpiPanel {
             </div>
             <div class="quad-figure">
               <span class="quad-val font-mono ${s.missedConnections > 0 ? 'color-alert' : ''}">${s.missedConnections}</span>
-              <span class="quad-denom font-mono">/ 21</span>
+              <span class="quad-denom font-mono">/ ${TOTAL_CONNECTIONS_COUNT}</span>
             </div>
             <span class="quad-sub font-mono">${s.missedConnections > 0 ? `${s.strandedFromMissedConnections} pax lost` : 'All Intact'}</span>
           </div>
@@ -136,7 +153,7 @@ export class KpiPanel {
             </div>
             <div class="quad-figure">
               <span class="quad-val font-mono ${s.crewBreaches > 0 ? 'color-alert' : ''}">${s.crewBreaches}</span>
-              <span class="quad-denom font-mono">/ 16</span>
+              <span class="quad-denom font-mono">/ ${TOTAL_CREWS_COUNT}</span>
             </div>
             <span class="quad-sub font-mono">${s.crewBreaches > 0 ? 'FDP Exceeded' : 'All Legal'}</span>
           </div>

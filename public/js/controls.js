@@ -15,6 +15,7 @@ const DEFAULT_START_TIME = '07:00';
 const DEFAULT_DURATION_MIN = 240;
 const BENCHMARK_PS_START_TIME = '15:00';
 const BENCHMARK_PS_DURATION_MIN = 90;
+const MINUTES_PER_HOUR = 60;
 
 /**
  * ControlPanel manages scenario input controls, preset chips, and closure simulation triggers.
@@ -31,6 +32,7 @@ export class ControlPanel {
 
   /**
    * Binds global state updates to synchronize inputs across scenario changes.
+   * @returns {void}
    */
   bindEvents() {
     state.on('simulation_updated', () => this.syncInputs());
@@ -40,6 +42,7 @@ export class ControlPanel {
   /**
    * Helper to broadcast live messages to screen readers.
    * @param {string} message - Message to announce.
+   * @returns {void}
    */
   announce(message) {
     const announcer = document.getElementById('a11y-announcer');
@@ -50,6 +53,7 @@ export class ControlPanel {
 
   /**
    * Renders the control card and form inputs.
+   * @returns {void}
    */
   render() {
     if (!state.network) return;
@@ -182,6 +186,7 @@ export class ControlPanel {
 
   /**
    * Attaches input and click listeners to DOM elements.
+   * @returns {void}
    */
   attachDomHandlers() {
     const airportSelect = this.container.querySelector('#ctrl-airport');
@@ -194,7 +199,7 @@ export class ControlPanel {
       const startVal = startTimeInput.value || DEFAULT_START_TIME;
       const dur = Number(durationInput.value);
       const [h, m] = startVal.split(':').map(Number);
-      const startMin = h * 60 + m;
+      const startMin = h * MINUTES_PER_HOUR + m;
       const endMin = startMin + dur;
       const text = `${dur} min (${toHHMM(startMin)} \u2013 ${toHHMM(endMin)})`;
       durationReadout.textContent = text;
@@ -222,7 +227,7 @@ export class ControlPanel {
         chip.classList.add('active');
         chip.setAttribute('aria-pressed', 'true');
         const t = chip.getAttribute('data-time');
-        if (startTimeInput) startTimeInput.value = t;
+        if (startTimeInput && t) startTimeInput.value = t;
         updateReadout();
       });
     });
@@ -230,9 +235,9 @@ export class ControlPanel {
     const runClosureBtn = this.container.querySelector('#btn-run-closure');
     if (runClosureBtn) {
       runClosureBtn.addEventListener('click', () => {
-        const ap = airportSelect.value;
-        const start = startTimeInput.value || DEFAULT_START_TIME;
-        const dur = Number(durationInput.value || DEFAULT_DURATION_MIN);
+        const ap = airportSelect ? airportSelect.value : DEFAULT_AIRPORT;
+        const start = startTimeInput && startTimeInput.value ? startTimeInput.value : DEFAULT_START_TIME;
+        const dur = Number(durationInput && durationInput.value ? durationInput.value : DEFAULT_DURATION_MIN);
         state.setClosure(ap, start, dur);
         this.announce(`Simulated closure of ${ap} starting at ${start} for ${dur} minutes.`);
       });
@@ -262,8 +267,9 @@ export class ControlPanel {
         if (startTimeInput) startTimeInput.value = BENCHMARK_PS_START_TIME;
         if (durationInput) durationInput.value = String(BENCHMARK_PS_DURATION_MIN);
         presetChips.forEach(c => {
-          c.classList.remove('active');
-          c.setAttribute('aria-pressed', 'false');
+          const isActive = c.getAttribute('data-time') === BENCHMARK_PS_START_TIME;
+          c.classList.toggle('active', isActive);
+          c.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
         updateReadout();
         state.setClosure(DEFAULT_AIRPORT, BENCHMARK_PS_START_TIME, BENCHMARK_PS_DURATION_MIN);
@@ -284,6 +290,7 @@ export class ControlPanel {
 
   /**
    * Synchronizes UI inputs with state model.
+   * @returns {void}
    */
   syncInputs() {
     const airportSelect = this.container.querySelector('#ctrl-airport');
@@ -313,8 +320,8 @@ export class ControlPanel {
 
     if (startTimeInput) startTimeInput.value = startStr.substring(0, 5);
 
-    const sMin = typeof c.start === 'string' ? (Number(c.start.split(':')[0]) * 60 + Number(c.start.split(':')[1])) : c.start;
-    const eMin = typeof c.end === 'string' ? (Number(c.end.split(':')[0]) * 60 + Number(c.end.split(':')[1])) : c.end;
+    const sMin = typeof c.start === 'string' ? (Number(c.start.split(':')[0]) * MINUTES_PER_HOUR + Number(c.start.split(':')[1])) : c.start;
+    const eMin = typeof c.end === 'string' ? (Number(c.end.split(':')[0]) * MINUTES_PER_HOUR + Number(c.end.split(':')[1])) : c.end;
     const dur = eMin - sMin;
 
     if (durationInput) {

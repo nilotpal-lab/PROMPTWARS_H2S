@@ -27,7 +27,18 @@ app.use(express.json({ limit: '64kb' }));
 const rateLimits = new Map();
 const RATE_LIMIT_WINDOW_MS = 60000;
 const MAX_REQUESTS_PER_WINDOW = 120;
+const MAX_CLOSURES_ALLOWED = 20;
+const MAX_ACTIONS_ALLOWED = 20;
+const MAX_MINUTES_IN_DAY = 1440;
+const MINUTES_PER_HOUR = 60;
 
+/**
+ * Express middleware for per-IP rate limiting.
+ * @param {express.Request} req - Inbound request.
+ * @param {express.Response} res - Outbound response.
+ * @param {express.NextFunction} next - Next handler callback.
+ * @returns {void}
+ */
 function rateLimiter(req, res, next) {
   if (process.env.NODE_ENV === 'test') return next();
   const ip = req.ip || req.connection?.remoteAddress || '127.0.0.1';
@@ -67,13 +78,43 @@ app.use(express.static(path.join(root, 'public')));
 
 const TIME_REGEX = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 
-/** Strict input validation and sanitization for disruption scenarios */
+/**
+ * @typedef {Object} ValidatedClosure
+ * @property {string} airport - 3-letter IATA code.
+ * @property {string} start - HH:MM IST.
+ * @property {string} end - HH:MM IST.
+ */
+
+/**
+ * @typedef {Object} ValidatedAction
+ * @property {'cancel'|'swap'} type - Action category.
+ * @property {string} flight_id - Flight identifier.
+ * @property {string} [spare] - Spare tail identifier.
+ */
+
+/**
+ * @typedef {Object} ValidatedScenario
+ * @property {ValidatedClosure[]} closures - Verified closure records.
+ * @property {ValidatedAction[]} actions - Verified action records.
+ */
+
+/**
+ * Strict input validation and sanitization for disruption scenarios.
+ * Protects against prototype pollution, unknown airports, inverted time windows, and malformed actions.
+ * @param {Object} body - Request payload.
+ * @returns {ValidatedScenario} Sanitized scenario object.
+ * @throws {Error} If payload violates structural or semantic constraints.
+ */
 export function parseScenario(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('Invalid request: payload must be a JSON object');
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, '__proto__') || Object.prototype.hasOwnProperty.call(body, 'constructor')) {
+  if (
+    Object.prototype.hasOwnProperty.call(body, '__proto__') ||
+    Object.prototype.hasOwnProperty.call(body, 'constructor') ||
+    Object.prototype.hasOwnProperty.call(body, 'prototype')
+  ) {
     throw new Error('Invalid payload: forbidden prototype property');
   }
 
@@ -81,28 +122,29 @@ export function parseScenario(body) {
   if (!Array.isArray(c) || !c.length) {
     throw new Error('closures[] required');
   }
-  if (c.length > 20) {
-    throw new Error('closures[] exceeded maximum limit (20)');
+  if (c.length > MAX_CLOSURES_ALLOWED) {
+    throw new Error(`closures[] exceeded maximum limit (${MAX_CLOSURES_ALLOWED})`);
   }
 
   const airportIds = new Set(network.airports.map((a) => a.id));
   const flightIds = new Set(network.flights.map((f) => f.flight_id));
+  const spareTails = new Set((network.spare_aircraft || []).map((s) => s.tail_id));
 
   const validatedClosures = c.map((x, i) => {
     if (!x || typeof x !== 'object') throw new Error(`bad closure at index ${i}`);
     if (!airportIds.has(x.airport)) throw new Error(`unknown airport ${x.airport}`);
 
     const isStartStr = typeof x.start === 'string' && TIME_REGEX.test(x.start);
-    const isStartNum = Number.isFinite(x.start) && x.start >= 0 && x.start <= 1440;
+    const isStartNum = Number.isFinite(x.start) && x.start >= 0 && x.start <= MAX_MINUTES_IN_DAY;
     if (!isStartStr && !isStartNum) throw new Error(`bad start time for ${x.airport}`);
 
     const isEndStr = typeof x.end === 'string' && TIME_REGEX.test(x.end);
-    const isEndNum = Number.isFinite(x.end) && x.end >= 0 && x.end <= 1440;
+    const isEndNum = Number.isFinite(x.end) && x.end >= 0 && x.end <= MAX_MINUTES_IN_DAY;
     if (!isEndStr && !isEndNum) throw new Error(`bad end time for ${x.airport}`);
 
     // Verify start <= end
-    const startMin = typeof x.start === 'number' ? x.start : parseInt(x.start.slice(0, 2), 10) * 60 + parseInt(x.start.slice(3, 5), 10);
-    const endMin = typeof x.end === 'number' ? x.end : parseInt(x.end.slice(0, 2), 10) * 60 + parseInt(x.end.slice(3, 5), 10);
+    const startMin = typeof x.start === 'number' ? x.start : parseInt(x.start.slice(0, 2), 10) * MINUTES_PER_HOUR + parseInt(x.start.slice(3, 5), 10);
+    const endMin = typeof x.end === 'number' ? x.end : parseInt(x.end.slice(0, 2), 10) * MINUTES_PER_HOUR + parseInt(x.end.slice(3, 5), 10);
     if (startMin > endMin) {
       throw new Error(`closure start (${x.start}) cannot be after end (${x.end})`);
     }
@@ -118,15 +160,27 @@ export function parseScenario(body) {
   let validatedActions = [];
   if (body.actions) {
     if (!Array.isArray(body.actions)) throw new Error('actions must be an array');
-    if (body.actions.length > 20) throw new Error('actions exceeded maximum limit (20)');
+    if (body.actions.length > MAX_ACTIONS_ALLOWED) throw new Error(`actions exceeded maximum limit (${MAX_ACTIONS_ALLOWED})`);
     validatedActions = body.actions.map((act, i) => {
       if (!act || typeof act !== 'object') throw new Error(`bad action at index ${i}`);
       if (!['cancel', 'swap'].includes(act.type)) throw new Error(`invalid action type ${act.type}`);
       if (!flightIds.has(act.flight_id)) throw new Error(`unknown flight_id ${act.flight_id}`);
+
+      if (act.spare) {
+        const spareStr = String(act.spare);
+        if (!spareTails.has(spareStr)) {
+          throw new Error(`unknown spare aircraft ${spareStr}`);
+        }
+        return {
+          type: act.type,
+          flight_id: act.flight_id,
+          spare: spareStr
+        };
+      }
+
       return {
         type: act.type,
-        flight_id: act.flight_id,
-        ...(act.spare ? { spare: String(act.spare) } : {})
+        flight_id: act.flight_id
       };
     });
   }

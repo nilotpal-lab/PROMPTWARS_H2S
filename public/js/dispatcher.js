@@ -40,6 +40,7 @@ export class DispatcherPanel {
 
   /**
    * Binds global state updates.
+   * @returns {void}
    */
   bindEvents() {
     state.on('scenario_changed', () => this.render());
@@ -50,6 +51,7 @@ export class DispatcherPanel {
   /**
    * Helper to broadcast live messages to screen readers.
    * @param {string} message - Message to announce.
+   * @returns {void}
    */
   announce(message) {
     const announcer = document.getElementById('a11y-announcer');
@@ -60,6 +62,7 @@ export class DispatcherPanel {
 
   /**
    * Fetches an optimized recovery plan from the server endpoint.
+   * @returns {Promise<void>}
    */
   async fetchRecoveryPlan() {
     const closures = state.scenario.closures || [];
@@ -109,6 +112,7 @@ export class DispatcherPanel {
 
   /**
    * Renders the dispatcher UI deck.
+   * @returns {void}
    */
   render() {
     const data = state.recoveryData;
@@ -322,6 +326,7 @@ export class DispatcherPanel {
 
   /**
    * Attaches event listeners to interactive controls.
+   * @returns {void}
    */
   attachDomHandlers() {
     const getPlanBtn = this.container.querySelector('#btn-get-plan');
@@ -332,7 +337,8 @@ export class DispatcherPanel {
     const toggleInput = this.container.querySelector('#toggle-apply-plan');
     if (toggleInput) {
       toggleInput.addEventListener('change', (e) => {
-        const checked = e.target.checked;
+        const target = /** @type {HTMLInputElement} */ (e.target);
+        const checked = Boolean(target.checked);
         state.toggleApplyPlan(checked);
         toggleInput.setAttribute('aria-checked', checked ? 'true' : 'false');
         this.announce(checked ? 'AI recovery plan applied to schedule and timeline.' : 'AI recovery plan removed from timeline.');
