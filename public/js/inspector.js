@@ -57,7 +57,7 @@ export class InspectorPanel {
     if (!state.simulation) return;
 
     this.container.innerHTML = `
-      <div class="inspector-box" role="region" aria-labelledby="heading-inspector">
+      <div class="inspector-box">
         <!-- 1. Flight Root Cause Investigation -->
         <div class="inspector-section" id="why-late-section">
           ${this.renderWhyLate()}
@@ -113,7 +113,8 @@ export class InspectorPanel {
    */
   renderWhyLate() {
     const fid = state.selectedFlightId;
-    if (!fid) {
+    const f = fid ? (state.simulation.flights || []).find(x => x.flight_id === fid) : null;
+    if (!f) {
       const delayed = (state.simulation.flights || [])
         .filter(f => f.status === 'delayed')
         .sort((a, b) => b.arrDelay - a.arrDelay)
@@ -145,10 +146,7 @@ export class InspectorPanel {
       `;
     }
 
-    const f = (state.simulation.flights || []).find(x => x.flight_id === fid);
-    if (!f) return '';
-
-    const chain = state.getFlightExplanation(fid);
+    const chain = state.getFlightExplanation(f.flight_id);
 
     let statusPill = `<span class="status-pill pill-nominal font-mono">ON TIME</span>`;
     if (f.status === 'delayed') {
@@ -179,7 +177,7 @@ export class InspectorPanel {
           <span>Tail: <strong>${f.aircraft}</strong></span>
           <span>Pax: <strong>${f.pax}</strong></span>
           <span>Sched: ${toHHMM(f.schedDep)}&ndash;${toHHMM(f.schedArr)}</span>
-          ${f.dep != null ? `<span>Actual: <strong class="text-bright">${toHHMM(f.dep)}&ndash;${toHHMM(f.arr)}</strong></span>` : ''}
+          ${(f.dep !== null && f.dep !== undefined) ? `<span>Actual: <strong class="text-bright">${toHHMM(f.dep)}&ndash;${toHHMM(f.arr)}</strong></span>` : ''}
         </div>
 
         <div class="chain-section">

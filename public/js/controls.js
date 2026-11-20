@@ -61,7 +61,7 @@ export class ControlPanel {
     const airports = state.network.airports || [];
 
     this.container.innerHTML = `
-      <div class="control-box" role="region" aria-labelledby="heading-disruption">
+      <div class="control-box">
         <div class="card-header">
           <div class="card-header-left">
             <span class="card-icon-beacon card-beacon-red" aria-hidden="true"></span>

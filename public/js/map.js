@@ -317,8 +317,9 @@ export class NetworkMap {
         dashAttr = 'stroke-dasharray="4,4"';
       }
 
+      const isFlightSelected = state.selectedFlightId === f.flight_id;
       html += `
-        <g class="trajectory-group" data-flight-id="${f.flight_id}" data-origin="${f.origin}" data-destination="${f.destination}" data-status="${f.status}" tabindex="0" role="button" aria-label="Flight ${f.flight_id}: ${f.origin} to ${f.destination}, ${f.status}">
+        <g class="trajectory-group" data-flight-id="${f.flight_id}" data-origin="${f.origin}" data-destination="${f.destination}" data-status="${f.status}" tabindex="0" role="button" aria-pressed="${isFlightSelected ? 'true' : 'false'}" aria-label="Flight ${f.flight_id}: ${f.origin} to ${f.destination}, ${f.status}">
           <path class="trajectory-hitbox" d="${pathD}" fill="none" stroke="transparent" stroke-width="12" style="cursor: pointer;" />
           <path class="trajectory-line ${strokeClass}" id="arc-${f.flight_id}" d="${pathD}" fill="none" stroke="${strokeColor}" ${dashAttr} />
         </g>
@@ -381,8 +382,9 @@ export class NetworkMap {
         labelDy = 10;
       }
 
+      const isAirportSelected = state.selectedAirportId === ap.id;
       html += `
-        <g class="hub-marker ${isClosed ? 'hub-closed' : ''} ${isMegaHub ? 'hub-megahub' : ''}" data-airport-id="${ap.id}" transform="translate(${pos.x}, ${pos.y})" tabindex="0" role="button" aria-label="Airport ${ap.id}, ${ap.city}, ${ap.tier.replace('_', ' ')}${isClosed ? ', currently closed' : ''}">
+        <g class="hub-marker ${isClosed ? 'hub-closed' : ''} ${isMegaHub ? 'hub-megahub' : ''}" data-airport-id="${ap.id}" transform="translate(${pos.x}, ${pos.y})" tabindex="0" role="button" aria-pressed="${isAirportSelected ? 'true' : 'false'}" aria-label="Airport ${ap.id}, ${ap.city}, ${ap.tier.replace('_', ' ')}${isClosed ? ', currently closed' : ''}">
           ${isClosed ? `
             <circle class="hazard-wave wave-1" r="${r + 2}" stroke="#ff7588" fill="none" />
             <circle class="hazard-wave wave-2" r="${r + 2}" stroke="#ff7588" fill="none" />
@@ -446,7 +448,7 @@ export class NetworkMap {
 
     for (const f of flights) {
       if (f.status === 'cancelled') continue;
-      if (f.dep == null || f.arr == null) continue;
+      if (f.dep === null || f.dep === undefined || f.arr === null || f.arr === undefined) continue;
 
       if (t >= f.dep && t <= f.arr) {
         const p1 = this.airportPositions[f.origin];
@@ -531,10 +533,12 @@ export class NetworkMap {
       let isFuture = false;
       if (!revealAll && state.simulation) {
         const flightData = (state.simulation.flights || []).find(x => x.flight_id === fid);
-        if (flightData && flightData.schedDep > t && (flightData.dep == null || flightData.dep > t)) {
+        if (flightData && flightData.schedDep > t && (flightData.dep === null || flightData.dep === undefined || flightData.dep > t)) {
           isFuture = true;
         }
       }
+
+      g.setAttribute('aria-pressed', isFlightSelected ? 'true' : 'false');
 
       if (selectedFid) {
         if (isFlightSelected) {
@@ -578,7 +582,9 @@ export class NetworkMap {
     const airportNodes = this.airportsGroup.querySelectorAll('.hub-marker');
     airportNodes.forEach(n => {
       const apId = n.getAttribute('data-airport-id');
-      if (selectedAid === apId) n.classList.add('hub-selected');
+      const isSelected = selectedAid === apId;
+      n.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      if (isSelected) n.classList.add('hub-selected');
       else n.classList.remove('hub-selected');
     });
   }

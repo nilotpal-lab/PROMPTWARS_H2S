@@ -128,3 +128,46 @@ test('Security: parseScenario accepts valid inputs and normalizes numeric/string
   assert.equal(res3.actions.length, 1);
   assert.equal(res3.actions[0].spare, 'VT-DS17');
 });
+
+test('Security: parseScenario rejects nested prototype pollution inside closures and actions', () => {
+  const nestedClosureProto = JSON.parse('{"closures":[{"airport":"BOM","start":"07:00","end":"11:00","__proto__":{"polluted":true}}]}');
+  assert.throws(() => parseScenario(nestedClosureProto), /forbidden prototype property/);
+
+  const nestedClosureConstructor = JSON.parse('{"closures":[{"airport":"BOM","start":"07:00","end":"11:00","constructor":{"polluted":true}}]}');
+  assert.throws(() => parseScenario(nestedClosureConstructor), /forbidden prototype property/);
+
+  const nestedActionProto = JSON.parse('{"closures":[{"airport":"BOM","start":"07:00","end":"11:00"}],"actions":[{"type":"cancel","flight_id":"DS0101","prototype":{"polluted":true}}]}');
+  assert.throws(() => parseScenario(nestedActionProto), /forbidden prototype property/);
+});
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('Code Quality: zero loose equality (== or !=) across all client and server JavaScript files', () => {
+  const jsFiles = [
+    'public/js/app.js',
+    'public/js/controls.js',
+    'public/js/dispatcher.js',
+    'public/js/gantt.js',
+    'public/js/india_geo.js',
+    'public/js/inspector.js',
+    'public/js/kpi.js',
+    'public/js/map.js',
+    'public/js/state.js',
+    'server/index.js',
+    'server/dispatcher.js'
+  ];
+
+  for (const rel of jsFiles) {
+    const fullPath = path.join(rootDir, rel);
+    const content = fs.readFileSync(fullPath, 'utf8');
+    const lines = content.split('\n');
+    lines.forEach((line, idx) => {
+      const match = line.match(/[^=!><\w](==|!=)[^=]/);
+      assert.ok(!match, `Loose equality violation at ${rel}:${idx + 1}: ${line.trim()}`);
+    });
+  }
+});

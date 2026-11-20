@@ -15,6 +15,7 @@ import { ControlPanel } from './controls.js';
 /**
  * Bootstraps all UI controller components and subscribes to state initialization.
  * @returns {Promise<void>}
+ * @throws {Error} If required DOM mount containers are missing from index.html.
  */
 async function initializeApp() {
   console.log('Initializing Domino Sky Airline Operations Center...');

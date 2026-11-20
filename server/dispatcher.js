@@ -214,6 +214,7 @@ async function callGemini(facts, feedback) {
 
 /** Cache store for identical scenario queries */
 const dispatchCache = new Map();
+const MAX_CACHE_ENTRIES = 500;
 
 /** Clears the dispatcher response cache */
 export function clearDispatchCache() {
@@ -281,6 +282,10 @@ export async function dispatch(network, scenario, { llm = process.env.GEMINI_API
   };
 
   if (useCache && isDefaultLlm) {
+    if (dispatchCache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = dispatchCache.keys().next().value;
+      if (oldestKey !== undefined) dispatchCache.delete(oldestKey);
+    }
     dispatchCache.set(cacheKey, result);
   }
   return result;

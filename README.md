@@ -1,7 +1,7 @@
 # Domino Sky — Flight Disruption Cascade & Recovery Simulator
 
 [![Vercel Deployment](https://img.shields.io/badge/Vercel-Live%20Production-brightgreen?logo=vercel)](https://domino-sky-rho.vercel.app)
-[![Tests Passing](https://img.shields.io/badge/Tests-48%2F48%20Passing-success)](https://github.com/nilotpal-lab/PROMPTWARS_H2S)
+[![Tests Passing](https://img.shields.io/badge/Tests-52%2F52%20Passing-success)](https://github.com/nilotpal-lab/PROMPTWARS_H2S)
 [![Deterministic Engine](https://img.shields.io/badge/Engine-100%25%20Deterministic-blue)](#)
 
 🚀 **Live Production URL:** [https://domino-sky-rho.vercel.app](https://domino-sky-rho.vercel.app)  
@@ -39,7 +39,7 @@ cp .env.example .env
 npm start
 # Server listens at http://localhost:3000
 
-# 5. Run automated test suite (48 tests, 0 network or API key required)
+# 5. Run automated test suite (52 tests, 0 network or API key required)
 npm test
 ```
 
@@ -246,7 +246,7 @@ npm test
 ✔ Security: parseScenario blocks prototype pollution and constructor injection
 ✔ API Integration: simulate endpoint handles valid payload and returns compliant simulation
 ...
-ℹ tests 48 | pass 48 | fail 0 | cancelled 0
+ℹ tests 52 | pass 52 | fail 0 | cancelled 0
 ```
 
 ---

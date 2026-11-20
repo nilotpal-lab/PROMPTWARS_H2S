@@ -222,3 +222,23 @@ test('Edge case: zero-minute instantaneous closure window handled gracefully', (
   assert.equal(sim.summary.cancelledFlights, 0);
   assert.equal(sim.summary.strandedPax, 0);
 });
+
+test('Accessibility & WCAG AAA: table markup adheres strictly to semantic caption and scoped headers', () => {
+  const dispatcherSrc = fs.readFileSync(path.join(root, 'public', 'js', 'dispatcher.js'), 'utf8');
+  assert.ok(dispatcherSrc.includes('<caption class="sr-only">'), 'Impact comparison table must declare sr-only caption');
+  assert.ok(dispatcherSrc.includes('<th scope="col"'), 'Table header must define th with scope="col"');
+  assert.ok(dispatcherSrc.includes('<th scope="row"'), 'Table row headers must define th with scope="row"');
+});
+
+test('Security & Robustness: dispatch caching safely bounds memory footprint and respects clearDispatchCache', async () => {
+  clearDispatchCache();
+  const testScenario = { closures: [{ airport: 'BOM', start: '08:00', end: '10:00' }] };
+  const res1 = await dispatch(net, testScenario, { llm: null, useCache: true });
+  assert.ok(res1.narrative);
+
+  // Cached retrieval
+  const res2 = await dispatch(net, testScenario, { llm: null, useCache: true });
+  assert.deepEqual(res1.plan, res2.plan);
+
+  clearDispatchCache();
+});

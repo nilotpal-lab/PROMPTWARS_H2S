@@ -43,6 +43,13 @@ function rateLimiter(req, res, next) {
   if (process.env.NODE_ENV === 'test') return next();
   const ip = req.ip || req.connection?.remoteAddress || '127.0.0.1';
   const now = Date.now();
+  if (rateLimits.size > 1000) {
+    for (const [key, val] of rateLimits.entries()) {
+      if (now > val.resetTime) {
+        rateLimits.delete(key);
+      }
+    }
+  }
   const record = rateLimits.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW_MS };
   if (now > record.resetTime) {
     record.count = 0;
@@ -99,6 +106,22 @@ const TIME_REGEX = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
  */
 
 /**
+ * Defensive prototype pollution detector for JSON objects.
+ * @param {*} obj - Candidate object.
+ * @throws {Error} If object contains forbidden prototype manipulation keys.
+ */
+function checkPrototypePollution(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  if (
+    Object.prototype.hasOwnProperty.call(obj, '__proto__') ||
+    Object.prototype.hasOwnProperty.call(obj, 'constructor') ||
+    Object.prototype.hasOwnProperty.call(obj, 'prototype')
+  ) {
+    throw new Error('Invalid payload: forbidden prototype property');
+  }
+}
+
+/**
  * Strict input validation and sanitization for disruption scenarios.
  * Protects against prototype pollution, unknown airports, inverted time windows, and malformed actions.
  * @param {Object} body - Request payload.
@@ -110,13 +133,7 @@ export function parseScenario(body) {
     throw new Error('Invalid request: payload must be a JSON object');
   }
 
-  if (
-    Object.prototype.hasOwnProperty.call(body, '__proto__') ||
-    Object.prototype.hasOwnProperty.call(body, 'constructor') ||
-    Object.prototype.hasOwnProperty.call(body, 'prototype')
-  ) {
-    throw new Error('Invalid payload: forbidden prototype property');
-  }
+  checkPrototypePollution(body);
 
   const c = body.closures;
   if (!Array.isArray(c) || !c.length) {
@@ -132,6 +149,7 @@ export function parseScenario(body) {
 
   const validatedClosures = c.map((x, i) => {
     if (!x || typeof x !== 'object') throw new Error(`bad closure at index ${i}`);
+    checkPrototypePollution(x);
     if (!airportIds.has(x.airport)) throw new Error(`unknown airport ${x.airport}`);
 
     const isStartStr = typeof x.start === 'string' && TIME_REGEX.test(x.start);
@@ -163,6 +181,7 @@ export function parseScenario(body) {
     if (body.actions.length > MAX_ACTIONS_ALLOWED) throw new Error(`actions exceeded maximum limit (${MAX_ACTIONS_ALLOWED})`);
     validatedActions = body.actions.map((act, i) => {
       if (!act || typeof act !== 'object') throw new Error(`bad action at index ${i}`);
+      checkPrototypePollution(act);
       if (!['cancel', 'swap'].includes(act.type)) throw new Error(`invalid action type ${act.type}`);
       if (!flightIds.has(act.flight_id)) throw new Error(`unknown flight_id ${act.flight_id}`);
 

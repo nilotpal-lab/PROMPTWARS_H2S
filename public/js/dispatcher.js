@@ -120,7 +120,7 @@ export class DispatcherPanel {
     const hasClosure = Boolean(state.scenario.closures && state.scenario.closures.length);
 
     this.container.innerHTML = `
-      <div class="dispatcher-box" role="region" aria-labelledby="heading-dispatcher">
+      <div class="dispatcher-box">
         <div class="card-header">
           <div class="card-header-left">
             <span class="card-icon-beacon card-beacon-cyan" aria-hidden="true"></span>
@@ -285,8 +285,8 @@ export class DispatcherPanel {
               </tr>
               <tr>
                 <th scope="row">Total Delay</th>
-                <td class="num-col text-dim">${b.totalDelayMin != null ? b.totalDelayMin + 'm' : '-'}</td>
-                <td class="num-col text-bright">${a.totalDelayMin != null ? a.totalDelayMin + 'm' : '-'}</td>
+                <td class="num-col text-dim">${(b.totalDelayMin !== null && b.totalDelayMin !== undefined) ? b.totalDelayMin + 'm' : '-'}</td>
+                <td class="num-col text-bright">${(a.totalDelayMin !== null && a.totalDelayMin !== undefined) ? a.totalDelayMin + 'm' : '-'}</td>
                 <td class="num-col">${renderDelta(deltaTotalDelay, 'm')}</td>
               </tr>
             </tbody>

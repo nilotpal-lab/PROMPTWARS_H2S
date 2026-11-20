@@ -44,7 +44,7 @@ export class GanttTimeline {
    */
   initStructure() {
     this.container.innerHTML = `
-      <div class="gantt-root" role="region" aria-labelledby="heading-gantt">
+      <div class="gantt-root">
         <!-- Gantt Controls Header -->
         <div class="gantt-top-bar">
           <div class="gantt-bar-title">
@@ -447,6 +447,7 @@ export class GanttTimeline {
         data-status="${f.status}"
         tabindex="0"
         role="button"
+        aria-pressed="${f.flight_id === state.selectedFlightId ? 'true' : 'false'}"
         aria-label="${a11yLabel}"
       >
         <div class="bar-scheduled-outline" style="left: ${schedLeft}%; width: ${schedWidth}%;" title="Scheduled ${toHHMM(sd)} - ${toHHMM(sa)}" aria-hidden="true"></div>
@@ -543,11 +544,9 @@ export class GanttTimeline {
     const bars = this.container.querySelectorAll('.leg-bar-group');
 
     bars.forEach(bar => {
-      if (bar.getAttribute('data-flight-id') === fid) {
-        bar.classList.add('leg-selected');
-      } else {
-        bar.classList.remove('leg-selected');
-      }
+      const isSelected = bar.getAttribute('data-flight-id') === fid;
+      bar.classList.toggle('leg-selected', isSelected);
+      bar.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     });
 
     rows.forEach(row => {

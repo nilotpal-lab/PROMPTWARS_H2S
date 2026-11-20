@@ -413,7 +413,7 @@ body.ops-theme {
 /* Action Disruptor Button (Clean Operations Red Gradient, Not Garish Alert) */
 .btn-action-disrupt {
   background: linear-gradient(180deg, #be123c 0%, #9f1239 100%);
-  border-color: #f43f5e;
+  border-color: var(--color-red);
   color: #fff;
   font-weight: 700;
   letter-spacing: 0.3px;
@@ -806,7 +806,7 @@ body.ops-theme {
 }
 input:checked + .toggle-slider {
   background-color: var(--color-green);
-  border-color: #34d399;
+  border-color: var(--color-green);
 }
 input:checked + .toggle-slider:before {
   transform: translateX(15px);
@@ -1000,7 +1000,7 @@ input:checked + .toggle-slider:before {
 .leg-ontime { background: rgba(56, 189, 248, 0.6); box-shadow: 0 0 4px var(--color-cyan); }
 .leg-delayed { background: var(--color-amber); box-shadow: 0 0 4px var(--color-amber); }
 .leg-cancelled { background: var(--color-red); box-shadow: 0 0 4px var(--color-red); }
-.leg-closure { background: #f43f5e; box-shadow: 0 0 6px #f43f5e; }
+.leg-closure { background: var(--color-red); box-shadow: 0 0 6px var(--color-red); }
 
 .map-viewport {
   flex: 1;
@@ -1452,13 +1452,13 @@ input:checked + .toggle-slider:before {
 
 .bar-cancelled {
   background: rgba(225, 29, 72, 0.2);
-  border: 1px dashed #f43f5e;
+  border: 1px dashed var(--color-red);
   color: #fecdd3;
   font-size: 7.5px;
 }
 
 .bar-spare-swap {
-  border-color: #818cf8;
+  border-color: var(--color-spare);
   box-shadow: 0 0 6px rgba(129, 140, 248, 0.3);
 }
 
@@ -1495,7 +1495,7 @@ input:checked + .toggle-slider:before {
   top: 2px;
   height: calc(var(--row-height) - 4px);
   background: rgba(129, 140, 248, 0.25);
-  border: 1px dotted #818cf8;
+  border: 1px dotted var(--color-spare);
   border-radius: 2px;
   display: flex;
   align-items: center;
@@ -1576,9 +1576,9 @@ input:checked + .toggle-slider:before {
 .swatch-sched { border: 1px dashed rgba(255, 255, 255, 0.4); }
 .swatch-ontime { background: #0f1a2e; border: 1px solid var(--color-cyan); }
 .swatch-delayed { background: #78350f; border: 1px solid #f59e0b; }
-.swatch-cancelled { background: rgba(225, 29, 72, 0.25); border: 1px dashed #f43f5e; }
-.swatch-spare { background: rgba(129, 140, 248, 0.3); border: 1px solid #818cf8; }
-.swatch-closure { background: rgba(244, 63, 94, 0.15); border: 1px solid #f43f5e; }
+.swatch-cancelled { background: rgba(225, 29, 72, 0.25); border: 1px dashed var(--color-red); }
+.swatch-spare { background: rgba(129, 140, 248, 0.3); border: 1px solid var(--color-spare); }
+.swatch-closure { background: rgba(244, 63, 94, 0.15); border: 1px solid var(--color-red); }
 
 /* ==========================================================================
    RIGHT PANEL: NETWORK IMPACT METRICS (KPIS)

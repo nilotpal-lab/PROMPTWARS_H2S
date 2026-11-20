@@ -42,7 +42,7 @@ export class KpiPanel {
   render() {
     if (!state.simulation || !state.simulation.summary) {
       this.container.innerHTML = `
-        <div class="kpi-deck" role="region" aria-labelledby="heading-kpi">
+        <div class="kpi-deck">
           <div class="card-header">
             <h2 class="card-title" id="heading-kpi">Network Impact</h2>
           </div>
@@ -64,7 +64,7 @@ export class KpiPanel {
     const hasImpact = s.strandedPax > 0 || s.cancelledFlights > 0 || s.delayedFlights > 0;
 
     this.container.innerHTML = `
-      <div class="kpi-deck" role="region" aria-labelledby="heading-kpi">
+      <div class="kpi-deck">
         <div class="card-header">
           <div class="card-header-left">
             <span class="card-icon-beacon ${hasImpact ? 'card-beacon-amber' : 'card-beacon-green'}" aria-hidden="true"></span>
