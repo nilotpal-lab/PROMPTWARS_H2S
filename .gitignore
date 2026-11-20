@@ -1,0 +1,15 @@
+# Environment variables & secrets (Security Requirement)
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# Logs and build artifacts
+*.log
+.taste-skill/
+shots/
+
+# OS specific files
+.DS_Store
+Thumbs.db
