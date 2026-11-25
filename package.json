@@ -1,0 +1,27 @@
+{
+  "name": "vayumitra",
+  "version": "1.0.0",
+  "description": "VayuMitra — Physics-honest Urban Air Quality & Winter Smog Assistant",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "lint": "eslint . --max-warnings 0",
+    "test": "node --test test/*.test.js",
+    "check": "npm run lint && npm test"
+  },
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "express": "^5.3.0",
+    "helmet": "^8.3.0"
+  },
+  "devDependencies": {
+    "axe-core": "^4.14.1",
+    "eslint": "^9.39.5",
+    "jsdom": "^31.0.1"
+  }
+}
