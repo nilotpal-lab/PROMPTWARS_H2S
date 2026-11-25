@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#F8F7F4">
+  <meta name="description" content="VayuMitra — Physics-honest daily air quality, daytime ventilation window, and indoor exposure router for Indian families and communities.">
+  <title>VayuMitra — Daily Smog &amp; Exposure Router</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="modulepreload" href="/js/i18n.js">
+  <link rel="modulepreload" href="/js/state.js">
+  <link rel="modulepreload" href="/js/api.js">
+  <link rel="modulepreload" href="/js/charts.js">
+  <link rel="modulepreload" href="/js/renderers.js">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content" data-i18n="skipToContent">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="brand-group">
+        <img src="/favicon.svg" width="32" height="32" alt="" class="brand-mark">
+        <div class="brand-text">
+          <span class="brand-name">VayuMitra</span>
+          <span class="brand-tag" data-i18n="brandTag">Daily Smog &amp; Exposure Router</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="lang-switch" role="group" aria-label="Language toggle" data-i18n-aria="langGroupLabel">
+          <button type="button" class="lang-btn" id="lang-en-btn" data-lang="en" aria-pressed="true">English</button>
+          <button type="button" class="lang-btn" id="lang-hi-btn" data-lang="hi" aria-pressed="false">हिन्दी</button>
+        </div>
+
+        <button type="button" class="btn btn-secondary" id="print-sheet-btn" data-i18n="printSheetBtn">Print Fridge Sheet</button>
+        <button type="button" class="btn btn-primary" id="open-copilot-btn" data-i18n="askCopilotBtn">Ask VayuMitra</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" tabindex="-1" class="container main-shell">
+    <section class="hero-intro" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow" data-i18n="heroEyebrow">CPCB NAQI + PBL Atmospheric Routing</p>
+        <h1 id="page-title" data-i18n="heroTitle">Route your family around winter smog peaks</h1>
+        <p class="hero-subtitle" id="hero-subtitle" data-i18n="heroSubtitle">Combine live hyper-local pollution, planetary boundary layer trapping, and indoor air physics into a clear daily plan.</p>
+      </div>
+    </section>
+
+    <section class="card control-bar" aria-labelledby="location-heading">
+      <h2 id="location-heading" class="section-kicker" data-i18n="locationHeading">Location, Winter Presets &amp; Station Calibration</h2>
+
+      <div class="location-grid">
+        <form id="city-search-form" class="search-form" role="search">
+          <label for="city-input" class="field-label" data-i18n="citySearchLabel">Indian city or locality</label>
+          <div class="input-row">
+            <input
+              id="city-input"
+              name="city"
+              type="search"
+              list="indian-cities-list"
+              enterkeyhint="search"
+              autocomplete="off"
+              maxlength="80"
+              placeholder="Delhi, Patna, Mumbai, Noida"
+            >
+            <button type="submit" class="btn btn-primary" id="city-submit-btn" data-i18n="checkAirBtn">Check Air</button>
+          </div>
+          <datalist id="indian-cities-list">
+            <option value="Delhi"></option>
+            <option value="Noida"></option>
+            <option value="Gurugram"></option>
+            <option value="Ghaziabad"></option>
+            <option value="Faridabad"></option>
+            <option value="Patna"></option>
+            <option value="Lucknow"></option>
+            <option value="Kanpur"></option>
+            <option value="Varanasi"></option>
+            <option value="Kolkata"></option>
+            <option value="Mumbai"></option>
+            <option value="Bengaluru"></option>
+            <option value="Hyderabad"></option>
+            <option value="Chennai"></option>
+            <option value="Ahmedabad"></option>
+            <option value="Pune"></option>
+            <option value="Jaipur"></option>
+            <option value="Chandigarh"></option>
+          </datalist>
+        </form>
+
+        <div class="presets-block">
+          <span class="field-label" id="presets-label" data-i18n="presetsLabel">Winter smog scenarios</span>
+          <div class="preset-group" role="group" aria-labelledby="presets-label">
+            <button type="button" class="chip-btn" id="preset-delhi" data-preset="delhi-severe" aria-pressed="true" data-i18n="presetDelhi">Delhi Severe</button>
+            <button type="button" class="chip-btn" id="preset-igp" data-preset="igp-very-poor" aria-pressed="false" data-i18n="presetIgp">IGP Very Poor</button>
+            <button type="button" class="chip-btn" id="preset-coastal" data-preset="coastal-moderate" aria-pressed="false" data-i18n="presetCoastal">Coastal Breeze</button>
+          </div>
+        </div>
+
+        <form id="calibration-form" class="calibration-form">
+          <label for="calibrated-aqi-input" class="field-label" data-i18n="calibrationLabel">Local monitor calibration (NAQI 1–999)</label>
+          <div class="input-row">
+            <input
+              id="calibrated-aqi-input"
+              name="calibratedAqi"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="999"
+              step="1"
+              enterkeyhint="done"
+              placeholder="e.g. 385"
+            >
+            <button type="submit" class="btn btn-secondary" id="apply-calibration-btn" data-i18n="applyCalBtn">Calibrate</button>
+            <button type="button" class="btn btn-ghost" id="clear-calibration-btn" hidden data-i18n="resetCalBtn">Reset</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="status-banner" class="status-line" role="status" aria-live="polite"></div>
+    </section>
+
+    <div id="alert-stack" class="alert-stack">
+      <div id="fire-alert-banner" class="alert-box alert-warning" role="region" aria-labelledby="fire-alert-title" hidden>
+        <div class="alert-content">
+          <h2 id="fire-alert-title" class="alert-title" data-i18n="fireAlertTitle">Upwind Stubble-Fire Smoke Alert</h2>
+          <p id="fire-alert-body" class="alert-body"></p>
+        </div>
+      </div>
+
+      <div id="inversion-banner" class="alert-box alert-info" role="region" aria-labelledby="inversion-title" hidden>
+        <div class="alert-content">
+          <h2 id="inversion-title" class="alert-title" data-i18n="inversionTitle">Winter Thermal Inversion Status</h2>
+          <p id="inversion-body" class="alert-body"></p>
+        </div>
+      </div>
+    </div>
+
+    <section class="telemetry-section" aria-labelledby="telemetry-heading">
+      <h2 id="telemetry-heading" class="sr-only" data-i18n="telemetryHeading">Current Air Quality &amp; 24-Hour Forecast</h2>
+
+      <div class="kpi-trio">
+        <article class="card kpi-card aqi-hero-card" id="aqi-hero-card" aria-labelledby="hero-location-city">
+          <div class="kpi-top">
+            <div class="kpi-title-wrap">
+              <p class="meta-label" id="hero-source-tier">Preset baseline</p>
+              <h3 class="city-title" id="hero-location-city">Delhi (Anand Vihar)</h3>
+            </div>
+            <div id="hero-band-badge" class="severity-badge severity-very-poor">
+              <span class="badge-icon-slot" id="hero-band-icon" aria-hidden="true"></span>
+              <span id="hero-band-text">Very Poor · Stage II</span>
+            </div>
+          </div>
+
+          <div class="aqi-readout-row">
+            <div class="aqi-big-group">
+              <span class="aqi-number tabular-nums" id="hero-naqi">340</span>
+              <span class="aqi-unit" data-i18n="cpcbNaqiUnit">CPCB NAQI</span>
+            </div>
+            <dl class="pollutant-mini-grid">
+              <div class="mini-stat">
+                <dt>PM2.5</dt>
+                <dd class="tabular-nums" id="hero-pm25">—</dd>
+              </div>
+              <div class="mini-stat">
+                <dt>PM10</dt>
+                <dd class="tabular-nums" id="hero-pm10">—</dd>
+              </div>
+              <div class="mini-stat">
+                <dt>NO₂</dt>
+                <dd class="tabular-nums" id="hero-no2">—</dd>
+              </div>
+              <div class="mini-stat">
+                <dt>CO</dt>
+                <dd class="tabular-nums" id="hero-co">—</dd>
+              </div>
+            </dl>
+          </div>
+
+          <p class="meta-note" id="calibration-status"></p>
+          <p class="attribution-line" id="data-attribution"></p>
+        </article>
+
+        <article class="card kpi-card" aria-labelledby="vent-card-heading">
+          <div class="kpi-top">
+            <h3 id="vent-card-heading" class="card-heading" data-i18n="ventCardHeading">Best Daytime Ventilation Window</h3>
+            <span id="vent-confidence-badge" class="status-pill">—</span>
+          </div>
+          <p class="window-time tabular-nums" id="vent-window-label">13:00–15:00 IST</p>
+          <p class="card-detail" id="vent-window-detail"></p>
+          <div class="peak-smog-row">
+            <span class="meta-label" data-i18n="peakSmogLabel">Peak smog hours</span>
+            <strong class="tabular-nums" id="peak-window-label">—</strong>
+          </div>
+        </article>
+
+        <article class="card kpi-card" aria-labelledby="changed-card-heading">
+          <div class="kpi-top">
+            <h3 id="changed-card-heading" class="card-heading" data-i18n="changedCardHeading">What Changed Today</h3>
+            <span class="ratio-pill tabular-nums" id="diurnal-swing-badge">—</span>
+          </div>
+          <p class="card-detail" id="what-changed-summary"></p>
+          <dl class="pbl-meta-list">
+            <div class="meta-pair">
+              <dt data-i18n="pblHeightLabel">Boundary layer (PBL)</dt>
+              <dd class="tabular-nums" id="hero-pbl">—</dd>
+            </div>
+            <div class="meta-pair">
+              <dt data-i18n="windSpeedLabel">Wind 10m</dt>
+              <dd class="tabular-nums" id="hero-wind">—</dd>
+            </div>
+            <div class="meta-pair">
+              <dt data-i18n="vcLabel">Ventilation Coeff.</dt>
+              <dd class="tabular-nums" id="hero-vc">—</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+
+      <div class="chart-and-diagram-grid">
+        <article class="card chart-card" aria-labelledby="chart-card-heading">
+          <div class="chart-header">
+            <div>
+              <h3 id="chart-card-heading" class="card-heading" data-i18n="chartCardHeading">24-Hour PM2.5 Curve &amp; Daytime Flush Slot</h3>
+              <p class="muted-caption" data-i18n="chartCardSub">Highlights the 09:00–18:00 IST daytime dispersion window vs nocturnal inversion peaks.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" id="toggle-table-btn" aria-expanded="false" aria-controls="pm25-table-wrap" data-i18n="showTableBtn">Show 24-hour data table</button>
+          </div>
+
+          <div class="svg-frame">
+            <svg id="pm25-chart-svg" class="pm25-chart-svg" viewBox="0 0 720 290" role="img" aria-labelledby="pm25-chart-title pm25-chart-desc">
+              <title id="pm25-chart-title">24-hour PM2.5 forecast curve</title>
+              <desc id="pm25-chart-desc">Hourly particulate concentration chart highlighting the daytime ventilation window and peak smog hours.</desc>
+            </svg>
+          </div>
+
+          <div id="pm25-table-wrap" class="table-wrap" hidden>
+            <table id="pm25-data-table" class="data-table">
+              <caption id="pm25-table-caption" data-i18n="tableCaption">24-hour forecast readings (IST), boundary layer height, and CPCB NAQI category</caption>
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="colHour">Hour (IST)</th>
+                  <th scope="col" data-i18n="colPm25">PM2.5 (µg/m³)</th>
+                  <th scope="col" data-i18n="colNaqi">NAQI</th>
+                  <th scope="col" data-i18n="colPbl">PBL (m)</th>
+                  <th scope="col" data-i18n="colVc">VC (m²/s)</th>
+                  <th scope="col" data-i18n="colCategory">Category / GRAP</th>
+                </tr>
+              </thead>
+              <tbody id="pm25-table-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <figure class="card diagram-card">
+          <img
+            src="/assets/winter-inversion-layers.webp"
+            width="800"
+            height="450"
+            decoding="async"
+            alt="Cross-section comparison showing daytime solar heating lifting the planetary boundary layer above 1,200 meters for safe 20-minute cross-ventilation versus a winter night thermal lid below 400 meters trapping vehicle, cooking, and burning PM2.5."
+          >
+          <figcaption class="diagram-caption" data-i18n="inversionDiagramCaption">
+            Why VayuMitra never tells families to open windows at 3 AM: cold winter nights collapse the thermal lid below 400 m, trapping smoke at breathing height until midday heating lifts dispersion.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="workspace-grid" aria-label="Household simulator and action plan">
+      <aside class="card simulator-panel" aria-labelledby="simulator-heading">
+        <div class="panel-head">
+          <h2 id="simulator-heading" class="panel-title" data-i18n="simulatorHeading">Household &amp; Impact Simulator</h2>
+          <p class="muted-caption" data-i18n="simulatorSub">Instant dosimetry updates as you adjust household members, indoor habits, and commute mode.</p>
+        </div>
+
+        <div id="simulator-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+        <div class="sim-kpi-strip" id="simulator-kpi-strip">
+          <div class="sim-kpi">
+            <span class="meta-label" data-i18n="simDoseLabel">Mitigated dose</span>
+            <strong class="tabular-nums" id="sim-dose-value">—</strong>
+          </div>
+          <div class="sim-kpi">
+            <span class="meta-label" data-i18n="simReducedLabel">Avoided vs baseline</span>
+            <strong class="tabular-nums" id="sim-reduced-value">—</strong>
+          </div>
+          <div class="sim-kpi">
+            <span class="meta-label" data-i18n="simIndoorLabel">Indoor PM2.5 (I/O)</span>
+            <strong class="tabular-nums" id="sim-indoor-value">—</strong>
+          </div>
+        </div>
+
+        <form id="simulator-form" class="sim-form">
+          <fieldset class="sim-fieldset">
+            <legend class="field-legend" data-i18n="householdMembersLegend">Household members in routine</legend>
+            <div class="checkbox-chip-grid" id="profiles-checkbox-grid">
+              <label class="chip-check"><input type="checkbox" name="profiles" value="infant"><span data-i18n="prof_infant">Infant (&lt; 2 yrs)</span></label>
+              <label class="chip-check"><input type="checkbox" name="profiles" value="school_child"><span data-i18n="prof_school_child">School Child (6–14)</span></label>
+              <label class="chip-check"><input type="checkbox" name="profiles" value="elderly_cardiac"><span data-i18n="prof_elderly_cardiac">Elderly / Cardiac</span></label>
+              <label class="chip-check"><input type="checkbox" name="profiles" value="asthmatic"><span data-i18n="prof_asthmatic">Asthmatic</span></label>
+              <label class="chip-check"><input type="checkbox" name="profiles" value="commuter" checked><span data-i18n="prof_commuter">Daily Commuter</span></label>
+              <label class="chip-check"><input type="checkbox" name="profiles" value="outdoor_worker"><span data-i18n="prof_outdoor_worker">Outdoor Worker</span></label>
+            </div>
+          </fieldset>
+
+          <div class="field-pair">
+            <div class="field-block">
+              <label for="profile-select" class="field-label" data-i18n="focusProfileLabel">Dose simulator focus member</label>
+              <select id="profile-select" name="profile">
+                <option value="commuter">Daily Commuter</option>
+                <option value="infant">Infant (&lt; 2 yrs)</option>
+                <option value="school_child">School Child (6–14 yrs)</option>
+                <option value="elderly_cardiac">Elderly / Cardiac (65+)</option>
+                <option value="asthmatic">Asthmatic / Respiratory</option>
+                <option value="outdoor_worker">Outdoor Worker</option>
+              </select>
+            </div>
+
+            <div class="field-block">
+              <label for="mask-select" class="field-label" data-i18n="maskLabel">Outdoor mask fit</label>
+              <select id="mask-select" name="maskType">
+                <option value="n95">Snug N95 / KN95 (85% fit)</option>
+                <option value="surgical">Loose Surgical (45% fit)</option>
+                <option value="cloth">Cloth Mask (20% fit)</option>
+                <option value="none">No Mask (0%)</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="infant-mask-warning" class="alert-box alert-danger" role="status" hidden>
+            <p class="alert-body" id="infant-mask-warning-text" data-i18n="infantMaskBlock">
+              HARD BLOCK: Never place any mask on infants under 2 years (suffocation risk). Mask filtration is locked to 0% for infant dosimetry; rely on filtered indoor rooms instead.
+            </p>
+          </div>
+
+          <div class="field-pair">
+            <div class="field-block">
+              <label for="purifier-select" class="field-label" data-i18n="purifierLabel">Indoor air filtration</label>
+              <select id="purifier-select" name="purifierMode">
+                <option value="none">None (Natural settling only)</option>
+                <option value="diy_cr_box">230V 4-Filter DIY CR Cube (320 m³/h)</option>
+                <option value="hepa_purifier">True HEPA H13 Purifier (260 m³/h)</option>
+              </select>
+            </div>
+
+            <div class="field-block">
+              <label for="room-volume-range" class="field-label">
+                <span data-i18n="roomVolumeLabel">Bedroom / room volume</span>:
+                <strong class="tabular-nums" id="room-volume-display">36 m³</strong>
+              </label>
+              <input id="room-volume-range" name="roomVolumeM3" type="range" min="10" max="500" step="2" value="36">
+              <p class="gate-line" id="cadr-gate-badge"></p>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <label for="outdoor-hours-range" class="field-label">
+              <span data-i18n="outdoorHoursLabel">Daily outdoor / transit hours</span>:
+              <strong class="tabular-nums" id="outdoor-hours-display">2.5 h</strong>
+            </label>
+            <input id="outdoor-hours-range" name="outdoorHours" type="range" min="0" max="16" step="0.5" value="2.5">
+          </div>
+
+          <fieldset class="sim-fieldset">
+            <legend class="field-legend" data-i18n="indoorSourcesLegend">Indoor smoke &amp; ventilation habits</legend>
+            <div class="toggle-stack">
+              <label class="toggle-row"><input type="checkbox" id="toggle-tadka" name="noExhaustTadka"><span data-i18n="toggleTadka">High-heat tadka / frying without kitchen exhaust</span></label>
+              <label class="toggle-row"><input type="checkbox" id="toggle-incense" name="indoorIncenseOrCoil"><span data-i18n="toggleIncense">Indoor agarbatti, dhoop, or mosquito coil</span></label>
+              <label class="toggle-row"><input type="checkbox" id="toggle-jhadu" name="dryJhaduSweeping"><span data-i18n="toggleJhadu">Dry jhadu sweeping (instead of damp pocha)</span></label>
+              <label class="toggle-row"><input type="checkbox" id="toggle-sealed" name="sealed24hNoFlush"><span data-i18n="toggleSealed">Sealed 24h without midday CO₂ flush</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="sim-fieldset">
+            <legend class="field-legend" data-i18n="commuteLegend">Daily commute swap</legend>
+            <div class="field-pair">
+              <div class="field-block">
+                <label for="commute-from-select" class="field-label" data-i18n="commuteFromLabel">Current mode</label>
+                <select id="commute-from-select" name="commuteFrom">
+                  <option value="petrol_car">Petrol Car (Solo)</option>
+                  <option value="diesel_cab">Diesel Cab / Auto</option>
+                  <option value="two_wheeler">Two-Wheeler</option>
+                  <option value="metro_bus">Metro / Electric Bus</option>
+                  <option value="ev">Electric Vehicle (EV)</option>
+                </select>
+              </div>
+              <div class="field-block">
+                <label for="commute-to-select" class="field-label" data-i18n="commuteToLabel">Cleaner swap</label>
+                <select id="commute-to-select" name="commuteTo">
+                  <option value="metro_bus">Metro / Electric Bus</option>
+                  <option value="ev">Electric Vehicle (EV)</option>
+                  <option value="wfh">Work From Home (WFH)</option>
+                  <option value="anti_idling">Engine-Off Anti-Idling</option>
+                  <option value="petrol_car">Petrol Car (Solo)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field-pair">
+              <div class="field-block">
+                <label for="daily-km-input" class="field-label" data-i18n="dailyKmLabel">Round-trip km/day</label>
+                <input id="daily-km-input" name="dailyKm" type="number" inputmode="numeric" min="0" max="200" step="1" value="16">
+              </div>
+              <div class="field-block">
+                <label for="commute-days-input" class="field-label" data-i18n="commuteDaysLabel">Days/week</label>
+                <input id="commute-days-input" name="commuteDaysPerWeek" type="number" inputmode="numeric" min="1" max="7" step="1" value="5">
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="sim-fieldset">
+            <legend class="field-legend" data-i18n="rwaLegend">RWA &amp; school collective actions</legend>
+            <div class="toggle-stack" id="community-actions-group">
+              <label class="toggle-row"><input type="checkbox" name="communityActions" value="compost_leaves" checked><span data-i18n="act_compost_leaves">Compost dry leaves (stop RWA bonfires)</span></label>
+              <label class="toggle-row"><input type="checkbox" name="communityActions" value="watchman_thermal_gear" checked><span data-i18n="act_watchman_thermal_gear">Watchman thermal gear + electric heater</span></label>
+              <label class="toggle-row"><input type="checkbox" name="communityActions" value="school_no_idling_dg_stagger"><span data-i18n="act_school_no_idling_dg_stagger">School-gate no-idling + noon DG test stagger</span></label>
+            </div>
+          </fieldset>
+        </form>
+      </aside>
+
+      <section class="card action-workspace" aria-labelledby="workspace-heading">
+        <div class="workspace-head">
+          <h2 id="workspace-heading" class="panel-title" data-i18n="workspaceHeading">Your Action Plan &amp; Verified Science</h2>
+          <span class="source-pill" id="plan-source-badge">Verified Baseline</span>
+        </div>
+
+        <div class="tablist" role="tablist" aria-label="Action plan sections" data-i18n-aria="tablistAria">
+          <button type="button" class="tab-btn" role="tab" id="tab-routine" aria-selected="true" aria-controls="panel-routine" tabindex="0" data-i18n="tabRoutine">Daily Routine</button>
+          <button type="button" class="tab-btn" role="tab" id="tab-iaq" aria-selected="false" aria-controls="panel-iaq" tabindex="-1" data-i18n="tabIaq">Indoor Air Hacks</button>
+          <button type="button" class="tab-btn" role="tab" id="tab-swaps" aria-selected="false" aria-controls="panel-swaps" tabindex="-1" data-i18n="tabSwaps">Sustainable Swaps</button>
+          <button type="button" class="tab-btn" role="tab" id="tab-impact" aria-selected="false" aria-controls="panel-impact" tabindex="-1" data-i18n="tabImpact">Impact &amp; Math</button>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-routine" aria-labelledby="tab-routine" tabindex="0">
+          <p class="plan-headline" id="plan-headline"></p>
+
+          <div id="medical-red-flag-banner" class="alert-box alert-danger" role="region" aria-labelledby="red-flag-heading" hidden>
+            <div class="alert-content">
+              <h3 id="red-flag-heading" class="alert-title" data-i18n="redFlagHeading">Medical Red-Flag Guardrail</h3>
+              <p id="red-flag-guidance" class="alert-body"></p>
+              <ul id="red-flag-signs" class="bullet-list"></ul>
+            </div>
+          </div>
+
+          <div class="subhead-row">
+            <h3 class="subsection-title" data-i18n="anchorsHeading">3-Anchor Conflict-Resolved Family Routine</h3>
+            <button type="button" class="btn btn-secondary" id="download-ics-btn" data-i18n="downloadIcsBtn">Add Reminders (.ics)</button>
+          </div>
+          <div id="routine-anchors" class="anchor-list"></div>
+
+          <h3 class="subsection-title" data-i18n="profileGuidanceHeading">Member-Specific Guardrails</h3>
+          <div id="profile-guidance-list" class="guidance-grid"></div>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-iaq" aria-labelledby="tab-iaq" tabindex="0" hidden>
+          <h3 class="subsection-title" data-i18n="iaqTiersHeading">Budget-Tiered Indoor Air Interventions</h3>
+          <div id="iaq-hacks-container" class="iaq-tier-grid"></div>
+
+          <figure class="card diagram-card diagram-inline">
+            <img
+              src="/assets/diy-corsi-rosenthal-230v.webp"
+              width="640"
+              height="420"
+              loading="lazy"
+              decoding="async"
+              alt="Diagram of a 230V/50Hz 4-filter MERV-13 Corsi-Rosenthal cube showing air drawn through all four sides to avoid motor overheating, optional activated carbon pre-wrap for cooking fumes, and sealed base seams."
+            >
+            <figcaption class="diagram-caption" data-i18n="diyDiagramCaption">
+              230V/50Hz safety rule: always pair 4 pleated MERV-13 filters in a sealed cube so low static resistance keeps Indian shaded-pole box fans cool.
+            </figcaption>
+          </figure>
+
+          <h3 class="subsection-title" data-i18n="mythBustersHeading">Smog Myth-Busters</h3>
+          <div id="myth-busters-list" class="myth-grid"></div>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-swaps" aria-labelledby="tab-swaps" tabindex="0" hidden>
+          <div class="swaps-summary-grid">
+            <div class="stat-box">
+              <span class="meta-label" data-i18n="weeklyCo2Label">Household CO₂e saved</span>
+              <strong class="stat-figure tabular-nums" id="swap-co2-value">—</strong>
+            </div>
+            <div class="stat-box">
+              <span class="meta-label" data-i18n="weeklyPm25Label">Local PM2.5 avoided</span>
+              <strong class="stat-figure tabular-nums" id="swap-pm25-value">—</strong>
+            </div>
+          </div>
+
+          <h3 class="subsection-title" data-i18n="multiplierHeading">RWA / Neighbourhood Scale Multiplier</h3>
+          <div class="table-wrap">
+            <table class="data-table" id="community-multipliers-table">
+              <caption data-i18n="multiplierCaption">Weekly collective impact if 100, 500, or 1,000 households adopt these actions</caption>
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="colHouseholds">Households</th>
+                  <th scope="col" data-i18n="colCo2Saved">CO₂e Saved (kg/wk)</th>
+                  <th scope="col" data-i18n="colPmAvoided">Local PM2.5 Avoided (g/wk)</th>
+                </tr>
+              </thead>
+              <tbody id="community-multipliers-body"></tbody>
+            </table>
+          </div>
+
+          <div class="whatsapp-card">
+            <div class="subhead-row">
+              <h3 class="subsection-title" data-i18n="whatsappHeading">RWA / School WhatsApp Action Brief</h3>
+              <button type="button" class="btn btn-primary" id="copy-whatsapp-btn" data-i18n="copyWhatsappBtn">Copy WhatsApp Brief</button>
+            </div>
+            <p class="brief-preview" id="whatsapp-brief-text"></p>
+            <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
+            <div id="whatsapp-fallback-wrap" class="fallback-copy-wrap" hidden>
+              <label for="whatsapp-fallback-input" class="field-label" data-i18n="copyFallbackLabel">Clipboard access unavailable — select and copy below</label>
+              <textarea id="whatsapp-fallback-input" rows="3" readonly></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-impact" aria-labelledby="tab-impact" tabindex="0" hidden>
+          <h3 class="subsection-title" data-i18n="doseAttributionHeading">Daily Inhaled PM2.5 Dose Breakdown (µg/day)</h3>
+          <p class="muted-caption" id="dose-summary-line"></p>
+
+          <div class="svg-frame">
+            <svg id="dose-bar-svg" class="dose-bar-svg" viewBox="0 0 640 120" role="img" aria-labelledby="dose-bar-title dose-bar-desc">
+              <title id="dose-bar-title">3-slice daily inhaled PM2.5 dose breakdown</title>
+              <desc id="dose-bar-desc">Segmented bar comparing commute and outdoor exposure, cooking and indoor sources, and baseline indoor infiltration.</desc>
+            </svg>
+          </div>
+
+          <div class="impact-cards-pair">
+            <article class="stat-box" id="cigarette-risk-card" aria-labelledby="cig-heading">
+              <h4 id="cig-heading" class="mini-heading" data-i18n="cigHeading">Adult Epidemiological Risk Equivalent</h4>
+              <p class="stat-figure tabular-nums" id="cig-value">—</p>
+              <p class="muted-caption" id="cig-disclaimer"></p>
+            </article>
+
+            <article class="stat-box" id="indoor-box-card" aria-labelledby="box-heading">
+              <h4 id="box-heading" class="mini-heading" data-i18n="boxHeading">Steady-State Indoor Box Model</h4>
+              <p class="stat-figure tabular-nums" id="box-cin-value">—</p>
+              <p class="muted-caption" id="box-meta-line"></p>
+            </article>
+          </div>
+
+          <details id="math-disclosure" class="math-disclosure">
+            <summary data-i18n="showMathLabel">Show the Math: Physics &amp; Dosimetry Equations</summary>
+            <div class="math-body" id="math-details-body"></div>
+          </details>
+        </div>
+      </section>
+    </section>
+
+    <section class="print-sheet-only" id="print-fridge-sheet" aria-hidden="true">
+      <h2 id="print-sheet-title">VayuMitra Daily Fridge Action Sheet</h2>
+      <p id="print-sheet-summary"></p>
+      <div id="print-sheet-anchors"></div>
+      <p id="print-sheet-safety"></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p data-i18n="footerNotice">VayuMitra provides physics-grounded air quality exposure guidance and is not a substitute for emergency medical care.</p>
+      <p class="footer-meta" id="footer-attribution">Open-Meteo CAMS &amp; Weather · CPCB NAQI · Berkeley Earth Equivalence</p>
+    </div>
+  </footer>
+
+  <dialog id="copilot-dialog" class="copilot-dialog" aria-labelledby="copilot-title">
+    <div class="copilot-shell">
+      <header class="copilot-header">
+        <div>
+          <h2 id="copilot-title" class="copilot-title" data-i18n="copilotTitle">Ask VayuMitra</h2>
+          <p class="copilot-subtitle tabular-nums" id="copilot-grounded-meta"></p>
+        </div>
+        <button type="button" class="btn btn-secondary close-dialog-btn" id="close-copilot-btn" aria-label="Close Ask VayuMitra" data-i18n="closeBtn">Close</button>
+      </header>
+
+      <div class="quick-chips" id="copilot-quick-chips" role="group" aria-label="Suggested questions"></div>
+
+      <div id="copilot-messages" class="copilot-messages" aria-live="polite" aria-relevant="additions text"></div>
+
+      <form id="copilot-form" class="copilot-form">
+        <label for="copilot-input" class="sr-only" data-i18n="copilotInputLabel">Ask a question about today's air quality or routine</label>
+        <input
+          id="copilot-input"
+          name="message"
+          type="text"
+          maxlength="500"
+          enterkeyhint="send"
+          autocomplete="off"
+          placeholder="Ask about window timing, masks, DIY filters, or cooking smoke"
+        >
+        <button type="submit" class="btn btn-primary" id="copilot-send-btn" data-i18n="sendBtn">Send</button>
+      </form>
+    </div>
+  </dialog>
+</body>
+</html>
