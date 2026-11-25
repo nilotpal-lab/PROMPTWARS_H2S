@@ -61,11 +61,17 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
       commuteFrom: 'diesel_cab',
       commuteTo: 'metro_bus',
       dailyKm: 24,
-      communityActions: ['compost_leaves']
+      communityActions: ['compost_leaves'],
+      lat: 28.6139,
+      lon: 77.209
     });
     assert.equal(valid.ok, true);
     assert.deepEqual(valid.data.profiles, ['infant', 'asthmatic']);
+    assert.equal(valid.data.lat, 28.6139);
+    assert.equal(valid.data.lon, 77.209);
 
+    assert.equal(validatePlanRequest({ lat: 28.6 }).ok, false);
+    assert.equal(validatePlanRequest({ lat: 95, lon: 77.2 }).ok, false);
     assert.equal(validatePlanRequest(null).ok, false);
     assert.equal(validatePlanRequest({ maskType: 'bandana' }).ok, false);
     assert.equal(validatePlanRequest({ purifierMode: 'ionizer' }).ok, false);
@@ -83,11 +89,14 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
         { role: 'user', text: 'Hi' },
         { role: 'assistant', text: 'Hello' }
       ],
-      lang: 'en'
+      lang: 'en',
+      context: { lat: 25.5941, lon: 85.1376, profiles: ['elderly_cardiac'] }
     });
     assert.equal(valid.ok, true);
     assert.equal(valid.data.message, 'Should I open windows at 2pm?');
     assert.equal(valid.data.history.length, 2);
+    assert.equal(valid.data.context.lat, 25.5941);
+    assert.equal(valid.data.context.lon, 85.1376);
 
     assert.equal(validateChatRequest({ message: '' }).ok, false);
     assert.equal(validateChatRequest({ message: '<<<>>>' }).ok, false);
