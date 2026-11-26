@@ -5,15 +5,16 @@
 
 export const I18N_STRINGS = Object.freeze({
   en: Object.freeze({
+    pageTitle: 'VayuMitra — Daily Smog & Air Action Guide',
     skipToContent: 'Skip to main content',
-    brandTag: 'Daily Smog & Exposure Router',
+    brandTag: 'Daily Smog & Air Action Guide',
     langGroupLabel: 'Language selection',
     printSheetBtn: 'Print Fridge Sheet',
     askCopilotBtn: 'Ask VayuMitra',
-    heroEyebrow: 'CPCB NAQI + PBL Atmospheric Routing',
+    heroEyebrow: 'CPCB NAQI + Weather Forecast Guide',
     heroTitle: 'Route your family around winter smog peaks',
-    heroSubtitle: 'Combine live hyper-local pollution, planetary boundary layer trapping, and indoor air physics into a clear daily plan.',
-    locationHeading: 'Location, Winter Presets & Station Calibration',
+    heroSubtitle: 'Combine city-level pollution forecasts, local monitor calibration, and indoor air calculations into a clear daily plan.',
+    locationHeading: 'Location, Winter Scenarios & Local Monitor Calibration',
     citySearchLabel: 'Indian city or locality',
     cityPlaceholder: 'Delhi, Patna, Mumbai, Noida',
     checkAirBtn: 'Check Air',
@@ -32,56 +33,59 @@ export const I18N_STRINGS = Object.freeze({
     ventCardHeading: 'Best Daytime Ventilation Window',
     peakSmogLabel: 'Peak smog hours',
     changedCardHeading: 'What Changed Today',
-    pblHeightLabel: 'Boundary layer (PBL)',
+    pblHeightLabel: 'Mixing height (PBL)',
     windSpeedLabel: 'Wind 10m',
-    vcLabel: 'Ventilation Coeff.',
-    chartCardHeading: '24-Hour PM2.5 Curve & Daytime Flush Slot',
-    chartCardSub: 'Highlights the 09:00–18:00 IST daytime dispersion window vs nocturnal inversion peaks.',
+    vcLabel: 'Air Clearing Speed',
+    chartCardHeading: '24-Hour PM2.5 Curve & Daytime Airing Slot',
+    chartCardSub: 'Highlights the 09:00–18:00 IST daytime airing window vs night smog peaks',
     showTableBtn: 'Show 24-hour data table',
     hideTableBtn: 'Hide 24-hour data table',
-    tableCaption: '24-hour forecast readings (IST), boundary layer height, and CPCB NAQI category',
+    tableCaption: '24-hour forecast readings (IST), mixing height, and CPCB NAQI category',
     colHour: 'Hour (IST)',
     colPm25: 'PM2.5 (µg/m³)',
     colNaqi: 'NAQI',
-    colPbl: 'PBL (m)',
-    colVc: 'VC (m²/s)',
+    colPbl: 'Mixing Ht (m)',
+    colVc: 'Clearing (m²/s)',
     colCategory: 'Category / GRAP',
-    inversionDiagramCaption: 'Why VayuMitra never tells families to open windows at 3 AM: cold winter nights collapse the thermal lid below 400 m, trapping smoke at breathing height until midday heating lifts dispersion.',
+    inversionDiagramAlt: 'Cross-section comparison showing daytime solar heating lifting air above 1,200 meters for safe 20-minute cross-ventilation versus a winter night cold lid below 400 meters trapping vehicle, cooking, and burning PM2.5.',
+    inversionDiagramCaption: 'Why VayuMitra never tells families to open windows at 3 AM: cold nights trap smoke below 400 m until midday warmth lifts dispersion',
+    simulatorAria: 'Household simulator and action plan',
     simulatorHeading: 'Household & Impact Simulator',
-    simulatorSub: 'Instant dosimetry updates as you adjust household members, indoor habits, and commute mode.',
-    simDoseLabel: 'Mitigated dose',
+    simulatorSub: 'Instant dose estimates update as you adjust family members, indoor habits, and commute mode',
+    simDoseLabel: 'Daily inhaled dose',
     simReducedLabel: 'Avoided vs baseline',
     simIndoorLabel: 'Indoor PM2.5 (I/O)',
     householdMembersLegend: 'Household members in routine',
     focusProfileLabel: 'Dose simulator focus member',
     maskLabel: 'Outdoor mask fit',
-    infantMaskBlock: 'HARD BLOCK: Never place any mask on infants under 2 years (suffocation risk). Mask filtration is locked to 0% for infant dosimetry; rely on filtered indoor rooms instead.',
+    infantMaskBlock: 'SAFETY RULE (Under 2 yrs): Never place any mask on infants under 2 years (suffocation risk). Mask protection stays 0% for infant dose math; rely on filtered indoor rooms instead.',
     purifierLabel: 'Indoor air filtration',
-    roomVolumeLabel: 'Bedroom / room volume',
+    roomVolumeLabel: 'Bedroom / room size',
     outdoorHoursLabel: 'Daily outdoor / transit hours',
     indoorSourcesLegend: 'Indoor smoke & ventilation habits',
     toggleTadka: 'High-heat tadka / frying without kitchen exhaust',
     toggleIncense: 'Indoor agarbatti, dhoop, or mosquito coil',
     toggleJhadu: 'Dry jhadu sweeping (instead of damp pocha)',
-    toggleSealed: 'Sealed 24h without midday CO₂ flush',
+    toggleSealed: 'Sealed 24h without midday CO₂ airing',
     commuteLegend: 'Daily commute swap',
     commuteFromLabel: 'Current mode',
     commuteToLabel: 'Cleaner swap',
     dailyKmLabel: 'Round-trip km/day',
     commuteDaysLabel: 'Days/week',
     rwaLegend: 'RWA & school collective actions',
-    workspaceHeading: 'Your Action Plan & Verified Science',
+    workspaceHeading: 'Your Daily Action Plan & Health Math',
     tablistAria: 'Action plan sections',
     tabRoutine: 'Daily Routine',
     tabIaq: 'Indoor Air Hacks',
     tabSwaps: 'Sustainable Swaps',
     tabImpact: 'Impact & Math',
-    redFlagHeading: 'Medical Red-Flag Guardrail',
-    anchorsHeading: '3-Anchor Conflict-Resolved Family Routine',
+    redFlagHeading: 'Medical Safety Alert',
+    anchorsHeading: '3-Anchor Family Daily Routine',
     downloadIcsBtn: 'Add Reminders (.ics)',
     profileGuidanceHeading: 'Member-Specific Guardrails',
     iaqTiersHeading: 'Budget-Tiered Indoor Air Interventions',
-    diyDiagramCaption: '230V/50Hz safety rule: always pair 4 pleated MERV-13 filters in a sealed cube so low static resistance keeps Indian shaded-pole box fans cool.',
+    diyDiagramAlt: 'Diagram of a 230V/50Hz 4-filter MERV-13 Corsi-Rosenthal cube showing air drawn through all four sides to avoid motor overheating, optional activated carbon pre-wrap for cooking fumes, and sealed base seams.',
+    diyDiagramCaption: '230V/50Hz safety rule: pair 4 pleated MERV-13 filters in a sealed cube so low air resistance keeps Indian box fan motors cool',
     mythBustersHeading: 'Smog Myth-Busters',
     weeklyCo2Label: 'Household CO₂e saved',
     weeklyPm25Label: 'Local PM2.5 avoided',
@@ -94,15 +98,17 @@ export const I18N_STRINGS = Object.freeze({
     copyWhatsappBtn: 'Copy WhatsApp Brief',
     copyFallbackLabel: 'Clipboard access unavailable — select and copy below',
     doseAttributionHeading: 'Daily Inhaled PM2.5 Dose Breakdown (µg/day)',
-    cigHeading: 'Adult Epidemiological Risk Equivalent',
-    boxHeading: 'Steady-State Indoor Box Model',
-    showMathLabel: 'Show the Math: Physics & Dosimetry Equations',
-    footerNotice: 'VayuMitra provides physics-grounded air quality exposure guidance and is not a substitute for emergency medical care.',
+    cigHeading: 'Cigarette-Risk Equivalent (Adults Only)',
+    boxHeading: 'Indoor Air Concentration Estimate',
+    showMathLabel: 'Show the Math: Air Quality & Dose Equations',
+    footerNotice: 'VayuMitra provides science-backed air quality exposure guidance and is not a substitute for emergency medical care.',
     copilotTitle: 'Ask VayuMitra',
     closeBtn: 'Close',
+    quickChipsAria: 'Suggested questions',
     copilotInputLabel: 'Ask a question about today\'s air quality or routine',
-    copilotPlaceholder: 'Ask about window timing, masks, DIY filters, or cooking smoke',
+    copilotPlaceholder: 'Ask about airing time, masks, DIY filters, or cooking smoke',
     sendBtn: 'Send',
+    sendingStatus: 'Preparing grounded reply...',
     prof_infant: 'Infant (< 2 yrs)',
     prof_school_child: 'School Child (6–14)',
     prof_elderly_cardiac: 'Elderly / Cardiac',
@@ -133,14 +139,14 @@ export const I18N_STRINGS = Object.freeze({
     outdoorRuleLabel: 'Outdoor timing',
     priorityActionLabel: 'Priority action',
     mythClaimLabel: 'Common myth',
-    mythFactLabel: 'Physics fact',
+    mythFactLabel: 'Science fact',
     anchorDoneLabel: 'Completed today',
-    sourceGemini: 'Gemini Grounded Plan',
-    sourceFallback: 'Verified Deterministic Baseline',
-    copiedDone: 'Copied brief to clipboard for WhatsApp.',
-    copyFailed: 'Automatic copy blocked — use the text box below.',
-    loadingStatus: 'Updating local air forecast and atmospheric boundary layer...',
-    staleNotice: 'Showing cached / baseline forecast while upstream station refreshes.',
+    sourceGemini: 'AI-Personalized Plan',
+    sourceFallback: 'Standard Action Plan',
+    copiedDone: 'Copied brief to clipboard for WhatsApp',
+    copyFailed: 'Automatic copy blocked — select and copy below',
+    loadingStatus: 'Updating air forecast and mixing height...',
+    staleNotice: 'Showing cached or baseline forecast while live station refreshes',
     errorPrefix: 'Could not reach live station: ',
     quickChips: [
       'Best time to open windows today?',
@@ -150,14 +156,15 @@ export const I18N_STRINGS = Object.freeze({
     ]
   }),
   hi: Object.freeze({
+    pageTitle: 'वायुमित्र — दैनिक धुंध और स्वास्थ्य सुरक्षा मार्गदर्शक',
     skipToContent: 'मुख्य सामग्री पर जाएं',
-    brandTag: 'दैनिक धुंध और संपर्क मार्गदर्शक',
+    brandTag: 'दैनिक धुंध और स्वास्थ्य मार्गदर्शक',
     langGroupLabel: 'भाषा चुनें',
     printSheetBtn: 'फ्रिज शीट प्रिंट करें',
     askCopilotBtn: 'वायुमित्र से पूछें',
-    heroEyebrow: 'CPCB NAQI + PBL वायुमंडलीय योजना',
+    heroEyebrow: 'CPCB NAQI + मौसम पूर्वानुमान योजना',
     heroTitle: 'सर्दियों की धुंध से अपने परिवार को सुरक्षित रखें',
-    heroSubtitle: 'स्थानीय प्रदूषण, वायुमंडलीय परत (PBL) और घर के अंदर की हवा के विज्ञान को स्पष्ट दैनिक योजना में बदलें।',
+    heroSubtitle: 'शहर स्तर के प्रदूषण पूर्वानुमान, स्थानीय मॉनिटर कैलिब्रेशन और घर के अंदर की हवा की गणना से स्पष्ट दैनिक योजना बनाएं।',
     locationHeading: 'स्थान, धुंध परिदृश्य और स्थानीय कैलिब्रेशन',
     citySearchLabel: 'भारतीय शहर या क्षेत्र',
     cityPlaceholder: 'दिल्ली, पटना, मुंबई, नोएडा',
@@ -174,59 +181,62 @@ export const I18N_STRINGS = Object.freeze({
     inversionTitle: 'शीतकालीन थर्मल इन्वर्ज़न स्थिति',
     telemetryHeading: 'वर्तमान वायु गुणवत्ता और 24-घंटे का पूर्वानुमान',
     cpcbNaqiUnit: 'CPCB NAQI',
-    ventCardHeading: 'दोपहर वेंटिलेशन की सबसे अच्छी खिड़की',
+    ventCardHeading: 'दोपहर वेंटिलेशन का सबसे सुरक्षित समय',
     peakSmogLabel: 'चरम धुंध के घंटे',
     changedCardHeading: 'आज क्या बदला',
-    pblHeightLabel: 'बाउंड्री लेयर (PBL)',
+    pblHeightLabel: 'मिश्रण ऊँचाई (PBL)',
     windSpeedLabel: 'हवा (10 मी)',
-    vcLabel: 'वेंटिलेशन गुणांक',
-    chartCardHeading: '24-घंटे PM2.5 ग्राफ और दोपहर की खिड़की',
-    chartCardSub: 'रात के इन्वर्ज़न शिखर की तुलना में 09:00–18:00 IST के बीच हवा बदलने का समय दिखाता है।',
+    vcLabel: 'हवा साफ होने की गति',
+    chartCardHeading: '24-घंटे PM2.5 ग्राफ और दोपहर का समय',
+    chartCardSub: 'रात के धुंध शिखर की तुलना में 09:00–18:00 IST के बीच हवा बदलने का समय दिखाता है',
     showTableBtn: '24-घंटे की डेटा तालिका दिखाएं',
     hideTableBtn: 'डेटा तालिका छिपाएं',
-    tableCaption: '24-घंटे के पूर्वानुमान (IST), PBL ऊँचाई और CPCB NAQI श्रेणी',
+    tableCaption: '24-घंटे के पूर्वानुमान (IST), मिश्रण ऊँचाई और CPCB NAQI श्रेणी',
     colHour: 'समय (IST)',
     colPm25: 'PM2.5 (µg/m³)',
     colNaqi: 'NAQI',
-    colPbl: 'PBL (मी)',
-    colVc: 'VC (m²/s)',
+    colPbl: 'ऊँचाई (मी)',
+    colVc: 'गति (m²/s)',
     colCategory: 'श्रेणी / GRAP',
-    inversionDiagramCaption: 'वायुमित्र रात 3 बजे खिड़की खोलने की सलाह क्यों नहीं देता: ठंडी रातों में वायुमंडलीय ढक्कन 400 मी से नीचे आकर धुएं को सांस की ऊँचाई पर रोक लेता है।',
+    inversionDiagramAlt: 'दोपहर में धूप से हवा की परत 1,200 मीटर से ऊपर उठकर सुरक्षित हवा बदलने और सर्दियों की रात में 400 मीटर से नीचे धुआं फंसने की तुलना दिखाने वाला चित्र।',
+    inversionDiagramCaption: 'वायुमित्र रात 3 बजे खिड़की खोलने की सलाह क्यों नहीं देता: ठंडी रातों में धुआं 400 मी से नीचे फंसा रहता है',
+    simulatorAria: 'परिवार सिम्युलेटर और कार्य योजना',
     simulatorHeading: 'परिवार और प्रभाव सिम्युलेटर',
-    simulatorSub: 'परिवार के सदस्यों, घरेलू आदतों और यात्रा के विकल्प बदलते ही फेफड़ों पर भार तुरंत देखें।',
+    simulatorSub: 'परिवार के सदस्यों, घरेलू आदतों और यात्रा विकल्प बदलते ही फेफड़ों पर भार तुरंत देखें',
     simDoseLabel: 'दैनिक PM2.5 भार',
     simReducedLabel: 'आधार से कमी',
     simIndoorLabel: 'इनडोर PM2.5 (I/O)',
     householdMembersLegend: 'परिवार के सदस्य चुनें',
     focusProfileLabel: 'डोज़ सिम्युलेटर मुख्य सदस्य',
     maskLabel: 'बाहर मास्क का प्रकार',
-    infantMaskBlock: 'सख्त चेतावनी: 2 वर्ष से कम के शिशु को कभी कोई मास्क न पहनाएं (घुटन का खतरा)। शिशु गणना में मास्क सुरक्षा 0% रखी गई है; बंद फ़िल्टर कमरे का उपयोग करें।',
+    infantMaskBlock: 'सुरक्षा नियम (2 वर्ष से कम): शिशु को कभी कोई मास्क न पहनाएं (घुटन का खतरा)। शिशु गणना में मास्क सुरक्षा 0% रखी गई है; बंद फ़िल्टर कमरे का उपयोग करें।',
     purifierLabel: 'कमरे का एयर फ़िल्टर',
-    roomVolumeLabel: 'कमरे का आयतन',
+    roomVolumeLabel: 'कमरे का आकार',
     outdoorHoursLabel: 'रोज़ बाहर बिताने के घंटे',
     indoorSourcesLegend: 'घर के अंदर धुआं और वेंटिलेशन आदतें',
     toggleTadka: 'बिना एग्जॉस्ट के तेज़ आंच पर तड़का / तलना',
     toggleIncense: 'घर के अंदर अगरबत्ती, धूप या मच्छर कॉइल',
     toggleJhadu: 'सूखा झाड़ू लगाना (गीले पोंछे के बजाय)',
-    toggleSealed: 'दोपहर में बिना CO₂ फ्लश किए 24 घंटे घर बंद',
+    toggleSealed: 'दोपहर में हवा बदले बिना 24 घंटे घर बंद',
     commuteLegend: 'यात्रा माध्यम बदलाव',
     commuteFromLabel: 'वर्तमान वाहन',
     commuteToLabel: 'स्वच्छ विकल्प',
     dailyKmLabel: 'दैनिक दूरी (किमी)',
     commuteDaysLabel: 'सप्ताह में दिन',
     rwaLegend: 'सोसाइटी (RWA) व स्कूल सामूहिक कदम',
-    workspaceHeading: 'दैनिक कार्य योजना और प्रमाणित विज्ञान',
+    workspaceHeading: 'दैनिक कार्य योजना और स्वास्थ्य गणित',
     tablistAria: 'कार्य योजना अनुभाग',
     tabRoutine: 'दैनिक दिनचर्या',
     tabIaq: 'घरेलू हवा उपाय',
     tabSwaps: 'स्वच्छ बदलाव',
     tabImpact: 'प्रभाव व गणित',
-    redFlagHeading: 'चिकित्सा सतर्कता (Red-Flag)',
+    redFlagHeading: 'चिकित्सा सुरक्षा चेतावनी',
     anchorsHeading: '3-चरणीय पारिवारिक दिनचर्या',
     downloadIcsBtn: 'रिमाइंडर डाउनलोड (.ics)',
     profileGuidanceHeading: 'सदस्य के अनुसार सुरक्षा निर्देश',
     iaqTiersHeading: 'बजट के अनुसार इनडोर उपाय',
-    diyDiagramCaption: '230V/50Hz सुरक्षा नियम: भारतीय बॉक्स फैन की मोटर को गर्म होने से बचाने के लिए हमेशा 4 MERV-13 फ़िल्टर का क्यूब बनाएं।',
+    diyDiagramAlt: '230V/50Hz 4-फ़िल्टर MERV-13 कॉर्सी-रोसेंथल बॉक्स का चित्र जिसमें चारों ओर से हवा अंदर आकर मोटर को ठंडा रखती है और तड़का धुएं के लिए कार्बन शीट व टेप सील दिखाई गई है।',
+    diyDiagramCaption: '230V/50Hz सुरक्षा नियम: भारतीय बॉक्स फैन की मोटर को गर्म होने से बचाने के लिए हमेशा 4 MERV-13 फ़िल्टर का क्यूब बनाएं',
     mythBustersHeading: 'प्रदूषण से जुड़े भ्रम और सच',
     weeklyCo2Label: 'साप्ताहिक CO₂e बचत',
     weeklyPm25Label: 'स्थानीय PM2.5 बचाव',
@@ -239,15 +249,17 @@ export const I18N_STRINGS = Object.freeze({
     copyWhatsappBtn: 'व्हाट्सऐप संदेश कॉपी करें',
     copyFallbackLabel: 'क्लिपबोर्ड उपलब्ध नहीं — नीचे से टेक्स्ट चुनकर कॉपी करें',
     doseAttributionHeading: 'दैनिक सांस द्वारा PM2.5 भार विभाजन (µg/दिन)',
-    cigHeading: 'वयस्क महामारी विज्ञान जोखिम समतुल्य',
-    boxHeading: 'इनडोर बॉक्स मॉडल सांद्रता',
-    showMathLabel: 'गणित देखें: भौतिकी और डोज़ सूत्र',
-    footerNotice: 'वायुमित्र भौतिक विज्ञान आधारित मार्गदर्शन देता है; आपात स्थिति में डॉक्टर से तुरंत संपर्क करें।',
+    cigHeading: 'सिगरेट जोखिम समतुल्य (केवल वयस्क)',
+    boxHeading: 'इनडोर हवा सांद्रता अनुमान',
+    showMathLabel: 'गणित देखें: वायु गुणवत्ता और डोज़ सूत्र',
+    footerNotice: 'वायुमित्र विज्ञान आधारित मार्गदर्शन देता है; आपात स्थिति में डॉक्टर से तुरंत संपर्क करें।',
     copilotTitle: 'वायुमित्र से पूछें',
     closeBtn: 'बंद करें',
+    quickChipsAria: 'सुझाए गए प्रश्न',
     copilotInputLabel: 'आज की वायु गुणवत्ता या दिनचर्या के बारे में प्रश्न पूछें',
-    copilotPlaceholder: 'खिड़की खोलने का समय, मास्क, DIY फ़िल्टर या तड़का धुएं के बारे में पूछें',
+    copilotPlaceholder: 'हवा बदलने का समय, मास्क, DIY फ़िल्टर या तड़का धुएं के बारे में पूछें',
     sendBtn: 'भेजें',
+    sendingStatus: 'उत्तर तैयार हो रहा है...',
     prof_infant: 'शिशु (< 2 वर्ष)',
     prof_school_child: 'स्कूली बच्चा (6–14)',
     prof_elderly_cardiac: 'बुज़ुर्ग / हृदय रोगी',
@@ -280,12 +292,12 @@ export const I18N_STRINGS = Object.freeze({
     mythClaimLabel: 'प्रचलित भ्रम',
     mythFactLabel: 'वैज्ञानिक सच',
     anchorDoneLabel: 'आज पूर्ण हुआ',
-    sourceGemini: 'Gemini आधारित योजना',
-    sourceFallback: 'प्रमाणित मानक योजना',
-    copiedDone: 'व्हाट्सऐप संदेश कॉपी हो गया।',
-    copyFailed: 'स्वचालित कॉपी उपलब्ध नहीं — नीचे दिए बॉक्स से कॉपी करें।',
-    loadingStatus: 'ताज़ा वायु गुणवत्ता और बाउंड्री लेयर डेटा लोड हो रहा है...',
-    staleNotice: 'स्थानीय डेटा अपडेट होने तक सुरक्षित आधारभूत पूर्वानुमान दिखाया जा रहा है।',
+    sourceGemini: 'AI-अनुकूलित योजना',
+    sourceFallback: 'मानक कार्य योजना',
+    copiedDone: 'व्हाट्सऐप संदेश कॉपी हो गया',
+    copyFailed: 'स्वचालित कॉपी उपलब्ध नहीं — नीचे दिए बॉक्स से कॉपी करें',
+    loadingStatus: 'ताज़ा वायु गुणवत्ता और मौसम डेटा लोड हो रहा है...',
+    staleNotice: 'ताज़ा डेटा अपडेट होने तक सुरक्षित मानक पूर्वानुमान दिखाया जा रहा है',
     errorPrefix: 'लाइव स्टेशन से संपर्क नहीं हो सका: ',
     quickChips: [
       'आज खिड़कियां खोलने का सबसे अच्छा समय क्या है?',
@@ -297,14 +309,6 @@ export const I18N_STRINGS = Object.freeze({
 });
 
 const OPTION_KEYS = Object.freeze({
-  'profile-select': [
-    ['commuter', 'prof_commuter'],
-    ['infant', 'prof_infant'],
-    ['school_child', 'prof_school_child'],
-    ['elderly_cardiac', 'prof_elderly_cardiac'],
-    ['asthmatic', 'prof_asthmatic'],
-    ['outdoor_worker', 'prof_outdoor_worker']
-  ],
   'mask-select': [
     ['n95', 'mask_n95'],
     ['surgical', 'mask_surgical'],
@@ -342,7 +346,7 @@ export function getStrings(lang) {
 }
 
 /**
- * Format numeric values safely with Indian grouping and tabular stability.
+ * Format numeric values cleanly with Indian grouping.
  * @param {number} value
  * @param {string} _lang
  * @param {number} [maxDecimals]
@@ -352,16 +356,42 @@ export function formatNumber(value, _lang, maxDecimals = 0) {
   if (!Number.isFinite(value)) {
     return '—';
   }
-  return new Intl.NumberFormat('en-IN', {
-    maximumFractionDigits: maxDecimals
-  }).format(value);
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: maxDecimals }).format(value);
 }
 
 /**
- * Update all select option text labels when language switches.
- * @param {ParentNode} root
- * @param {Record<string, unknown>} dict
+ * Sync #profile-select options dynamically to ONLY the checked household profiles.
+ * @param {Document} doc
+ * @param {readonly string[]} checkedProfiles
+ * @param {string} selectedProfile
+ * @param {'en' | 'hi'} lang
  */
+export function syncProfileSelectOptions(doc, checkedProfiles, selectedProfile, lang) {
+  const select = doc.getElementById('profile-select');
+  if (!select) {
+    return;
+  }
+  const dict = getStrings(lang);
+  const validList = checkedProfiles.length > 0 ? checkedProfiles : ['commuter'];
+  const options = validList.map((id) => {
+    const opt = doc.createElement('option');
+    opt.value = id;
+    opt.textContent = String(dict[`prof_${id}`] || id);
+    return opt;
+  });
+  select.replaceChildren(...options);
+  select.value = validList.includes(selectedProfile) ? selectedProfile : validList[0];
+}
+
+function localizeAttrTargets(doc, dict, attrName, targetAttr) {
+  for (const el of doc.querySelectorAll(`[${attrName}]`)) {
+    const key = el.getAttribute(attrName);
+    if (key && typeof dict[key] === 'string') {
+      el.setAttribute(targetAttr, dict[key]);
+    }
+  }
+}
+
 function localizeSelectOptions(root, dict) {
   for (const [selectId, pairs] of Object.entries(OPTION_KEYS)) {
     const select = root.getElementById ? root.getElementById(selectId) : root.querySelector(`#${selectId}`);
@@ -378,7 +408,7 @@ function localizeSelectOptions(root, dict) {
 }
 
 /**
- * Apply localized static strings, aria labels, placeholders, and <html lang>.
+ * Apply localized static strings, <title>, aria labels, alt text, placeholders, and <html lang>.
  * @param {Document} doc
  * @param {'en' | 'hi'} lang
  */
@@ -388,6 +418,7 @@ export function applyStaticI18n(doc, lang) {
   if (doc.documentElement) {
     doc.documentElement.lang = safeLang;
   }
+  doc.title = String(dict.pageTitle);
 
   for (const el of doc.querySelectorAll('[data-i18n]')) {
     const key = el.getAttribute('data-i18n');
@@ -396,25 +427,8 @@ export function applyStaticI18n(doc, lang) {
     }
   }
 
-  for (const el of doc.querySelectorAll('[data-i18n-aria]')) {
-    const key = el.getAttribute('data-i18n-aria');
-    if (key && typeof dict[key] === 'string') {
-      el.setAttribute('aria-label', dict[key]);
-    }
-  }
-
-  const cityInput = doc.getElementById('city-input');
-  if (cityInput) {
-    cityInput.placeholder = String(dict.cityPlaceholder);
-  }
-  const calInput = doc.getElementById('calibrated-aqi-input');
-  if (calInput) {
-    calInput.placeholder = String(dict.calibrationPlaceholder);
-  }
-  const chatInput = doc.getElementById('copilot-input');
-  if (chatInput) {
-    chatInput.placeholder = String(dict.copilotPlaceholder);
-  }
-
+  localizeAttrTargets(doc, dict, 'data-i18n-aria', 'aria-label');
+  localizeAttrTargets(doc, dict, 'data-i18n-alt', 'alt');
+  localizeAttrTargets(doc, dict, 'data-i18n-placeholder', 'placeholder');
   localizeSelectOptions(doc, dict);
 }

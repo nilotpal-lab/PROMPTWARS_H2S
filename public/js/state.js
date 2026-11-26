@@ -1,6 +1,6 @@
 /**
- * @fileoverview Client state defaults, localStorage persistence, seeded initial snapshot,
- * and a pure 0ms browser mirror of lib/impact.js steady-state dosimetry & swap math.
+ * @fileoverview Client state defaults, localStorage persistence, seeded initial snapshot
+ * with real CPCB NAQI piecewise math, and pure 0ms mirror of lib/impact.js.
  */
 
 export const PROFILE_PARAMS = Object.freeze({
@@ -11,6 +11,15 @@ export const PROFILE_PARAMS = Object.freeze({
   commuter: Object.freeze({ id: 'commuter', ventilationRateM3PerDay: 15.5, maskAllowed: true, defaultOutdoorHours: 2.5, exertionFactor: 1.35 }),
   outdoor_worker: Object.freeze({ id: 'outdoor_worker', ventilationRateM3PerDay: 22.0, maskAllowed: true, defaultOutdoorHours: 7.0, exertionFactor: 1.5 })
 });
+
+export const PROFILE_RISK_ORDER = Object.freeze([
+  'infant',
+  'asthmatic',
+  'elderly_cardiac',
+  'school_child',
+  'outdoor_worker',
+  'commuter'
+]);
 
 const MASK_EFFICIENCY = Object.freeze({ none: 0, cloth: 0.2, surgical: 0.45, n95: 0.85 });
 const PURIFIER_CADR_M3H = Object.freeze({ none: 0, diy_cr_box: 320, hepa_purifier: 260 });
@@ -32,12 +41,77 @@ const COMMUNITY_ACTIONS = Object.freeze({
   school_no_idling_dg_stagger: Object.freeze({ co2eSavedKgPerHouseholdWeek: 1.8, pm25AvoidedGPerHouseholdWeek: 9.5 })
 });
 
+const PM25_BREAKPOINTS = Object.freeze([
+  [0, 30, 0, 50],
+  [30, 60, 50, 100],
+  [60, 90, 100, 200],
+  [90, 120, 200, 300],
+  [120, 250, 300, 400],
+  [250, 380, 400, 500]
+]);
+
+const PM10_BREAKPOINTS = Object.freeze([
+  [0, 50, 0, 50],
+  [50, 100, 50, 100],
+  [100, 250, 100, 200],
+  [250, 350, 200, 300],
+  [350, 430, 300, 400],
+  [430, 510, 400, 500]
+]);
+
 function clamp(val, min, max) {
   return Math.min(max, Math.max(min, val));
 }
 
+function optClampedNumber(val, fallback, min, max) {
+  if (typeof val !== 'number' || !Number.isFinite(val)) {
+    return fallback;
+  }
+  return clamp(val, min, max);
+}
+
+function pickEnum(val, table, fallback) {
+  const key = String(val);
+  return Object.hasOwn(table, key) ? key : fallback;
+}
+
 function roundToNearest10(ug) {
   return Math.max(0, Math.round(ug / 10) * 10);
+}
+
+function interpolateCpcb(conc, table) {
+  const safe = Math.max(0, conc);
+  for (const [bLo, bHi, iLo, iHi] of table) {
+    if (safe <= bHi) {
+      return Math.round(iLo + ((safe - bLo) / (bHi - bLo)) * (iHi - iLo));
+    }
+  }
+  const [bLo, bHi, iLo, iHi] = table[table.length - 1];
+  return Math.min(999, Math.round(iHi + (safe - bHi) * ((iHi - iLo) / (bHi - bLo))));
+}
+
+function classifySeededNaqi(naqi) {
+  if (naqi <= 50) {
+    return { category: 'Good', categoryHi: 'अच्छा', band: 'good', grapStage: null };
+  }
+  if (naqi <= 100) {
+    return { category: 'Satisfactory', categoryHi: 'संतोषजनक', band: 'satisfactory', grapStage: null };
+  }
+  if (naqi <= 200) {
+    return { category: 'Moderately Polluted', categoryHi: 'मध्यम प्रदूषित', band: 'moderate', grapStage: null };
+  }
+  if (naqi <= 300) {
+    return { category: 'Poor', categoryHi: 'खराब', band: 'poor', grapStage: 'Stage I' };
+  }
+  if (naqi <= 400) {
+    return { category: 'Very Poor', categoryHi: 'बहुत खराब', band: 'very-poor', grapStage: 'Stage II' };
+  }
+  return {
+    category: 'Severe',
+    categoryHi: 'गंभीर',
+    band: naqi > 450 ? 'severe-plus' : 'severe',
+    grapStage: naqi > 450 ? 'Stage IV (Severe+)' : 'Stage III'
+  };
 }
 
 function classifyCadrGate(cadrM3h, purifierAch) {
@@ -120,11 +194,6 @@ function computeCommute(fromMode, toMode, dailyKm, days) {
   };
 }
 
-function pickEnum(val, table, fallback) {
-  const key = String(val);
-  return Object.hasOwn(table, key) ? key : fallback;
-}
-
 function normalizeHouseholdBooleans(safe) {
   return {
     noExhaustTadka: Boolean(safe.noExhaustTadka),
@@ -139,23 +208,23 @@ function normalizeMirrorInputs(outdoorPm25, household) {
   const safe = household && typeof household === 'object' ? household : {};
   const profileId = pickEnum(safe.profile, PROFILE_PARAMS, 'commuter');
   const profileSpec = PROFILE_PARAMS[profileId];
-  const maskReq = pickEnum(safe.maskType, MASK_EFFICIENCY, 'n95');
+  const maskReq = pickEnum(safe.maskType, MASK_EFFICIENCY, 'none');
   const maskBlocked = !profileSpec.maskAllowed;
 
   return {
-    pm: clamp(Number(outdoorPm25) || 0, 0, 1500),
+    pm: optClampedNumber(outdoorPm25, 180, 0, 1500),
     profileId,
     profileSpec,
     maskReq,
     maskBlocked,
     maskEff: maskBlocked ? 0 : MASK_EFFICIENCY[maskReq],
-    roomVolumeM3: clamp(Number(safe.roomVolumeM3) || 36, 10, 500),
-    outdoorHours: clamp(Number(safe.outdoorHours ?? profileSpec.defaultOutdoorHours), 0, 16),
-    purifierMode: String(safe.purifierMode ?? 'none'),
-    commuteFrom: String(safe.commuteFrom ?? 'petrol_car'),
-    commuteTo: String(safe.commuteTo ?? 'metro_bus'),
-    dailyKm: clamp(Number(safe.dailyKm) || 0, 0, 200),
-    commuteDaysPerWeek: clamp(Number(safe.commuteDaysPerWeek) || 5, 1, 7),
+    roomVolumeM3: optClampedNumber(safe.roomVolumeM3, 36, 10, 500),
+    outdoorHours: optClampedNumber(safe.outdoorHours, profileSpec.defaultOutdoorHours, 0, 16),
+    purifierMode: pickEnum(safe.purifierMode, PURIFIER_CADR_M3H, 'none'),
+    commuteFrom: pickEnum(safe.commuteFrom, COMMUTE_FACTORS, 'petrol_car'),
+    commuteTo: pickEnum(safe.commuteTo, COMMUTE_FACTORS, 'metro_bus'),
+    dailyKm: optClampedNumber(safe.dailyKm, 16, 0, 200),
+    commuteDaysPerWeek: optClampedNumber(safe.commuteDaysPerWeek, 5, 1, 7),
     ...normalizeHouseholdBooleans(safe)
   };
 }
@@ -261,7 +330,7 @@ export function saveLang(lang) {
   try {
     window.localStorage.setItem('vayumitra:lang', lang === 'hi' ? 'hi' : 'en');
   } catch (_err) {
-    // Storage unavailable in private contexts
+    // Storage unavailable
   }
 }
 
@@ -288,22 +357,24 @@ function buildInitialHourlySeries() {
     const mix = clamp(Math.sin(((h - 7) / 14) * Math.PI), 0, 1);
     const rush = h === 8 || h === 9 || h === 19 || h === 20 || h === 21 ? 1.15 : 1;
     const pm25 = Math.round((138 + 145 * (1 - mix)) * rush);
+    const pm10 = Math.round(pm25 * 1.58);
     const pblMeters = Math.round(185 + 835 * mix);
     const windSpeed10mMs = Number((0.85 + 1.5 * mix).toFixed(2));
+    const naqi = Math.max(interpolateCpcb(pm25, PM25_BREAKPOINTS), interpolateCpcb(pm10, PM10_BREAKPOINTS));
+    const cls = classifySeededNaqi(naqi);
     return {
       time: `2026-11-25T${String(h).padStart(2, '0')}:00`,
       istHour: h,
       pm25,
-      pm10: Math.round(pm25 * 1.58),
+      pm10,
       no2: Math.round(68 * (0.65 + 0.55 * (1 - mix)) * rush),
       coMgM3: Number(((1650 * (0.7 + 0.6 * (1 - mix)) * rush) / 1000).toFixed(2)),
       pblMeters,
       windSpeed10mMs,
       ventilationCoefficient: Math.round(pblMeters * windSpeed10mMs),
       inversionRisk: pblMeters < 400 ? 'High' : pblMeters < 1200 ? 'Moderate' : 'Low',
-      naqi: Math.min(500, Math.round(pm25 * 1.35)),
-      category: pm25 > 250 ? 'Severe' : pm25 > 120 ? 'Very Poor' : 'Poor',
-      grapStage: pm25 > 250 ? 'Stage III' : pm25 > 120 ? 'Stage II' : 'Stage I'
+      naqi,
+      ...cls
     };
   });
 }
@@ -335,19 +406,19 @@ export function createInitialState() {
   const snapshot = {
     location: { city: 'Delhi (Anand Vihar)', lat: 28.6469, lon: 77.316, presetId: 'delhi-severe', source: 'preset' },
     sourceTier: 'preset',
-    attribution: ['Open-Meteo CAMS & Weather', 'CPCB NAQI Breakpoints'],
+    attribution: [{ name: 'VayuMitra Winter Smog Preset' }],
     fetchedAt: new Date().toISOString(),
     stale: false,
-    current: { ...hourly24h[8], categoryHi: 'गंभीर', band: 'severe', dominantPollutant: 'PM2.5' },
+    current: { ...hourly24h[8], dominantPollutant: 'PM2.5' },
     calibration: { applied: false, source: null, observedPm25: null, k0: 1 },
-    ventilationWindow: { startHour: 13, endHour: 15, label: '13:00–15:00 IST', avgPm25: 138, avgNaqi: 314, confidence: 'brief_only' },
-    peakSmogWindow: { startHour: 20, endHour: 22, label: '20:00–22:00 IST', maxPm25: 325, maxNaqi: 458 },
+    ventilationWindow: { startHour: 13, endHour: 15, label: '13:00–15:00 IST', avgPm25: hourly24h[13].pm25, avgNaqi: hourly24h[13].naqi, confidence: 'brief_only' },
+    peakSmogWindow: { startHour: 20, endHour: 22, label: '20:00–22:00 IST', maxPm25: hourly24h[21].pm25, maxNaqi: hourly24h[21].naqi },
     whatChangedToday: {
-      deltaPm25: 180,
-      deltaNaqi: 240,
-      peakToMiddayRatio: 2.4,
+      deltaPm25: hourly24h[8].pm25 - 60,
+      deltaNaqi: hourly24h[8].naqi - 100,
+      peakToMiddayRatio: Number((hourly24h[21].pm25 / Math.max(hourly24h[14].pm25, 1)).toFixed(1)),
       trend: 'worse',
-      summaryEn: 'Shallow PBL traps emissions until midday heating lifts dispersion.',
+      summaryEn: 'Shallow atmospheric layer traps emissions until midday heating lifts dispersion.',
       summaryHi: 'कमज़ोर हवा व निचली परत के कारण दोपहर से पहले तक धुआं सतह के पास जमा रहता है।'
     },
     hourly24h,

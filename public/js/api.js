@@ -18,12 +18,22 @@ function startRequestSignal(channel) {
 }
 
 async function parseJsonResponse(res) {
-  const data = await res.json().catch(() => null);
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_err) {
+    if (res.ok) {
+      throw new Error('Unexpected non-JSON response from server');
+    }
+  }
   if (!res.ok) {
     const msg = data?.error?.message || `Request failed (${res.status})`;
     const err = new Error(msg);
     err.status = res.status;
     throw err;
+  }
+  if (!data || typeof data !== 'object') {
+    throw new Error('Empty JSON payload from server');
   }
   return data;
 }
