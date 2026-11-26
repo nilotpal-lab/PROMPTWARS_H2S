@@ -8,6 +8,7 @@ import {
   SCENARIO_PRESETS,
   buildAirQualitySnapshot,
   computeNaqi,
+  cpcbPm25SubIndexToUgM3,
   usEpaPm25AqiToUgM3
 } from '../lib/aqi.js';
 import { createTtlCache } from './cache.js';
@@ -205,14 +206,79 @@ function numOr(val, fallback) {
 }
 
 /**
+ * Extract valid non-negative PM2.5 numbers (or null for missing slots) across a window.
+ * @param {readonly unknown[]} pmArr
+ * @param {number} startIdx
+ * @param {number} endIdx
+ * @returns {(number | null)[]}
+ */
+function extractWindowPm25(pmArr, startIdx, endIdx) {
+  const slots = [];
+  for (let i = startIdx; i < endIdx; i += 1) {
+    const val = pmArr?.[i];
+    slots.push(typeof val === 'number' && Number.isFinite(val) && val >= 0 ? val : null);
+  }
+  return slots;
+}
+
+/**
+ * Find index of next non-null number starting at startOffset, or -1.
+ * @param {readonly (number | null)[]} slots
+ * @param {number} startOffset
+ * @returns {number}
+ */
+function findNextValidSlot(slots, startOffset) {
+  for (let j = startOffset; j < slots.length; j += 1) {
+    if (slots[j] !== null) {
+      return j;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Linearly interpolate (or boundary-clamp) null PM2.5 slots; throw if all slots are missing.
+ * @param {(number | null)[]} rawSlots
+ * @returns {number[]}
+ */
+function interpolatePm25Slots(rawSlots) {
+  const firstValid = findNextValidSlot(rawSlots, 0);
+  if (firstValid < 0) {
+    throw new Error('Open-Meteo Tier 0 Air Quality pm2_5 slots are all missing');
+  }
+  const out = [...rawSlots];
+  let lastValid = firstValid;
+
+  for (let i = 0; i < out.length; i += 1) {
+    if (out[i] !== null) {
+      lastValid = i;
+      continue;
+    }
+    if (i < firstValid) {
+      out[i] = out[firstValid];
+      continue;
+    }
+    const nextIdx = findNextValidSlot(out, i + 1);
+    if (nextIdx < 0) {
+      out[i] = out[lastValid];
+      continue;
+    }
+    const ratio = (i - lastValid) / (nextIdx - lastValid);
+    out[i] = Number((out[lastValid] + ratio * (out[nextIdx] - out[lastValid])).toFixed(1));
+  }
+  return out;
+}
+
+/**
  * Map a single merged Open-Meteo AQ + Weather hour into normalized snapshot entry.
  * Normalizes wind_speed_10m from km/h to m/s (divide by 3.6).
  * @param {Record<string, unknown[]>} aqHourly
  * @param {Map<string, { pbl: unknown, windKmh: unknown, rh: unknown }>} wxByTime
  * @param {number} idx
+ * @param {number} pm25Value
  * @returns {Record<string, unknown>}
  */
-function mapMergedHour(aqHourly, wxByTime, idx) {
+function mapMergedHour(aqHourly, wxByTime, idx, pm25Value) {
   const timeStr = String(aqHourly.time[idx]);
   const wx = wxByTime.get(timeStr) ?? {};
   const windMs = typeof wx.windKmh === 'number' && Number.isFinite(wx.windKmh)
@@ -220,7 +286,7 @@ function mapMergedHour(aqHourly, wxByTime, idx) {
     : 1.5;
   return {
     time: timeStr,
-    pm2_5: numOr(aqHourly.pm2_5?.[idx], 0),
+    pm2_5: pm25Value,
     pm10: numOr(aqHourly.pm10?.[idx], 0),
     carbon_monoxide: numOr(aqHourly.carbon_monoxide?.[idx], 0),
     nitrogen_dioxide: numOr(aqHourly.nitrogen_dioxide?.[idx], 0),
@@ -249,10 +315,11 @@ function mergeOpenMeteoSeries(aqJson, wxJson, epochMs) {
   const foundIdx = aqHourly.time.findIndex((t) => String(t) >= nowKey);
   const startIdx = foundIdx >= 0 ? Math.min(foundIdx, Math.max(0, aqHourly.time.length - 24)) : 0;
   const endIdx = Math.min(aqHourly.time.length, startIdx + 24);
+  const pm25Series = interpolatePm25Slots(extractWindowPm25(aqHourly.pm2_5, startIdx, endIdx));
   const merged = [];
 
   for (let i = startIdx; i < endIdx; i += 1) {
-    merged.push(mapMergedHour(aqHourly, wxByTime, i));
+    merged.push(mapMergedHour(aqHourly, wxByTime, i, pm25Series[i - startIdx]));
   }
   return merged;
 }
@@ -299,7 +366,18 @@ function parseFirmsCsv(csvText) {
 }
 
 /**
- * Extract valid PM2.5 numeric concentration from a CPCB data.gov.in record.
+ * Extract unit metadata string from a CPCB data.gov.in record.
+ * @param {Record<string, unknown>} rec
+ * @returns {string}
+ */
+function readCpcbUnit(rec) {
+  return String(rec.unit || rec.pollutant_unit || rec.uom || '').trim();
+}
+
+/**
+ * Extract valid PM2.5 concentration (ug/m3) from a CPCB data.gov.in record.
+ * Converts CPCB sub-index values via cpcbPm25SubIndexToUgM3 unless unit metadata
+ * explicitly declares ug/m3.
  * @param {Record<string, unknown>} rec
  * @returns {number | null}
  */
@@ -308,11 +386,11 @@ function parseCpcbPm25Value(rec) {
     return null;
   }
   const pol = String(rec.pollutant_id ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (pol !== 'PM25') {
+  const val = Number(rec.pollutant_avg ?? rec.avg_value);
+  if (pol !== 'PM25' || !Number.isFinite(val) || val <= 0 || val > 1500) {
     return null;
   }
-  const val = Number(rec.pollutant_avg ?? rec.avg_value);
-  return Number.isFinite(val) && val > 0 && val <= 1500 ? val : null;
+  return /(?:µg|ug)\s*\/\s*m|microgram/i.test(readCpcbUnit(rec)) ? val : cpcbPm25SubIndexToUgM3(val);
 }
 
 /**
@@ -474,12 +552,20 @@ export function createAirQualityService(deps = {}) {
     return res.ok ? parseWaqiPayload(await res.json()) : null;
   }
 
-  async function fetchCpcb(lat, lon, cityName) {
+  async function fetchCpcb(lat, lon, cityName, filterCity) {
     const key = (env.DATA_GOV_IN_API_KEY ?? '').trim();
     if (!key) {
       return null;
     }
-    const params = new URLSearchParams({ 'api-key': key, format: 'json', limit: '100' });
+    const params = new URLSearchParams({
+      'api-key': key,
+      format: 'json',
+      limit: '100',
+      'filters[pollutant_id]': 'PM2.5'
+    });
+    if (filterCity) {
+      params.set('filters[city]', filterCity);
+    }
     const url = `https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69?${params}`;
     const res = await safeFetch(url, { timeoutMs: 2000, fetchImpl, secrets: envSecrets });
     if (!res.ok) {
@@ -508,10 +594,10 @@ export function createAirQualityService(deps = {}) {
     return parsed;
   }
 
-  async function fetchOptionalTiers(lat, lon, cityName) {
+  async function fetchOptionalTiers(lat, lon, cityName, filterCity) {
     const settled = await Promise.allSettled([
       withDeadline(fetchWaqi(lat, lon).catch(() => null), 2000),
-      withDeadline(fetchCpcb(lat, lon, cityName).catch(() => null), 2000),
+      withDeadline(fetchCpcb(lat, lon, cityName, filterCity).catch(() => null), 2000),
       withDeadline(fetchFirms(lat, lon).catch(() => ({ ...EMPTY_FIRE_ALERT })), 2000)
     ]);
 
@@ -522,30 +608,18 @@ export function createAirQualityService(deps = {}) {
     };
   }
 
-  function assembleResponse(payload, query) {
-    const {
-      hourly24h,
-      city,
-      lat,
-      lon,
-      presetId,
-      source,
-      sourceTier,
-      attribution,
-      fetchedAt,
-      stale,
-      stationCal,
-      regionalContext
-    } = payload;
-
+  function assembleResponse(payload, query, target) {
+    const resolvedCity = target?.city ?? payload.city;
+    const resolvedLat = target?.lat ?? payload.lat;
+    const resolvedLon = target?.lon ?? payload.lon;
     const hasUserCal = query.calibratedPm25 !== undefined || query.calibratedAqi !== undefined;
     const snapshot = buildAirQualitySnapshot({
-      city,
-      lat,
-      lon,
-      presetId,
-      source,
-      hourly24h,
+      city: resolvedCity,
+      lat: resolvedLat,
+      lon: resolvedLon,
+      presetId: payload.presetId,
+      source: payload.source,
+      hourly24h: payload.hourly24h,
       yesterday: query.yesterday,
       ...(hasUserCal
         ? {
@@ -553,23 +627,23 @@ export function createAirQualityService(deps = {}) {
             calibratedAqi: query.calibratedAqi,
             calibrationSource: 'user-calibrated'
           }
-        : stationCal)
+        : payload.stationCal)
     });
 
     const windows = enrichWindows(snapshot);
     return {
       location: snapshot.location,
-      sourceTier,
-      attribution,
-      fetchedAt,
-      stale,
+      sourceTier: payload.sourceTier,
+      attribution: payload.attribution,
+      fetchedAt: payload.fetchedAt,
+      stale: payload.stale,
       current: snapshot.current,
       calibration: snapshot.calibration,
       ventilationWindow: windows.ventilationWindow,
       peakSmogWindow: windows.peakSmogWindow,
       whatChangedToday: snapshot.whatChangedToday,
       hourly24h: snapshot.hourly24h,
-      regionalContext
+      regionalContext: payload.regionalContext
     };
   }
 
@@ -636,10 +710,22 @@ export function createAirQualityService(deps = {}) {
 
   async function resolveTargetCoordinates(query) {
     if (query.lat !== undefined && query.lon !== undefined) {
-      return { city: query.city ?? `${query.lat.toFixed(2)}, ${query.lon.toFixed(2)}`, lat: query.lat, lon: query.lon };
+      return {
+        city: query.city ?? `${query.lat.toFixed(2)}, ${query.lon.toFixed(2)}`,
+        lat: query.lat,
+        lon: query.lon,
+        cpcbCity: null
+      };
     }
     if (query.city) {
-      return geocodeCity(query.city);
+      const geo = await geocodeCity(query.city);
+      if (!geo) {
+        return null;
+      }
+      return {
+        ...geo,
+        cpcbCity: geo.city.split(',')[0].trim()
+      };
     }
     return null;
   }
@@ -648,11 +734,11 @@ export function createAirQualityService(deps = {}) {
     try {
       const [hourly24h, optional] = await Promise.all([
         fetchTier0(target.lat, target.lon),
-        fetchOptionalTiers(target.lat, target.lon, target.city)
+        fetchOptionalTiers(target.lat, target.lon, target.city, target.cpcbCity)
       ]);
+      // Omit request-specific city strings from coordinate cache to prevent cache poisoning
       const livePayload = {
         hourly24h,
-        city: target.city,
         lat: target.lat,
         lon: target.lon,
         presetId: null,
@@ -663,11 +749,11 @@ export function createAirQualityService(deps = {}) {
       };
       cache.set(`stale:${cacheKey}`, livePayload, STALE_TTL_MS);
       cache.set(cacheKey, livePayload, FRESH_TTL_MS);
-      return assembleResponse(livePayload, query);
+      return assembleResponse(livePayload, query, target);
     } catch {
       const stalePayload = cache.get(`stale:${cacheKey}`);
       if (stalePayload) {
-        return assembleResponse({ ...stalePayload, stale: true }, query);
+        return assembleResponse({ ...stalePayload, stale: true }, query, target);
       }
       return assembleResponse(
         buildPresetPayload(pickClosestPresetId(target.lat, target.lon), {
@@ -678,7 +764,8 @@ export function createAirQualityService(deps = {}) {
           sourceTier: 'fallback-preset',
           stale: true
         }),
-        query
+        query,
+        target
       );
     }
   }
@@ -704,7 +791,7 @@ export function createAirQualityService(deps = {}) {
     const cacheKey = `aqi:${target.lat.toFixed(2)}:${target.lon.toFixed(2)}`;
     const cachedFresh = cache.get(cacheKey);
     return cachedFresh
-      ? assembleResponse(cachedFresh, query)
+      ? assembleResponse(cachedFresh, query, target)
       : fetchLiveWithFallback(target, query, cacheKey);
   }
 

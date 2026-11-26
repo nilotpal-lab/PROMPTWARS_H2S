@@ -4,12 +4,14 @@
  * in-flight coalescing, post-LLM schema & safety floor verification, and deterministic fallback.
  */
 
+import { createHash } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { SAFETY_LIMITS, generateFallbackChatReply } from '../lib/recommender.js';
 import { redactSecrets } from './httpClient.js';
 
 const DEFAULT_MODEL = 'gemini-4-hydrogen';
 const MODEL_NAME_REGEX = /^gemini-[a-z0-9.-]+$/;
+const GEMINI_TIMEOUT_MS = 6500;
 
 const STATIC_PLAN_SYSTEM_INSTRUCTION = [
   'You are VayuMitra, a calm, physics-honest urban air quality coach for Indian households.',
@@ -82,12 +84,25 @@ const CHAT_RESPONSE_SCHEMA = {
 };
 
 const UNSAFE_HTML_REGEX = /<[a-z!/]|javascript:|onerror\s*=|onload\s*=/i;
-const NEGATION_REGEX = /\b(?:never|no|not|avoid|forbidden|block|skip|disable|harmful|myth|destructive|cancel|stop|don't|do not|cannot)\b|नहीं|मना|बंद|खतरनाक|गलत|रद्द|टालें/i;
-const INFANT_MENTION_REGEX = /\b(?:infant|baby|toddler|newborn)s?\b|शिशु/i;
+const DOUBLE_NEGATIVE_REGEX =
+  /\b(?:not\s+hesitate|don't\s+hesitate|do\s+not\s+hesitate|don't\s+skip|do\s+not\s+skip|never\s+skip|no\s+problem|no\s+harm|no\s+issue|safe\s+to|okay\s+to|fine\s+to)\b/i;
+const SAFE_PROHIBITION_REGEX =
+  /\b(?:never\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|recommend|exercise|jog|cycle)|do\s+not\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|exercise|jog|cycle)|don't\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|exercise|jog|cycle)|no\s+mask(?:s)?\b|mask\s+forbidden|avoid|disable|skip|stop|cancel|turn\s+off|harmful|destructive|myth|false)\b|मास्क\s+न|न\s+पहनाएं|मना|बंद|मत|बचें|कभी\s+नहीं|धोएं\s+नहीं|न\s+धोएं|खतरनाक|गलत|भ्रम|रद्द|टालें|(?:^|\s)न(?:\s|$)/iu;
+const INFANT_MENTION_REGEX = /\b(?:infant|baby|toddler|newborn)s?\b|शिशु|नवजात/i;
 const MASK_MENTION_REGEX = /\b(?:mask|n95|kn95)s?\b|मास्क/i;
 const OZONE_MENTION_REGEX = /\b(?:ozone|ionizer)s?\b|ओज़ोन|आयोनाइज़र/i;
 const WASH_VERB_REGEX = /\b(?:wash|washing|boil|boiling|soak|soap)\b|धोने|उबालने/i;
-const SEVERE_EXERCISE_MENTION_REGEX = /\b(?:outdoor\s+(?:run|running|jog|jogging|exercise|workout|sports)|run\s+outdoors|jog\s+outdoors)\b/i;
+const SEVERE_EXERCISE_MENTION_REGEX =
+  /\b(?:outdoor\s+(?:run|running|jog|jogging|cycling|exercise|workout|sports)|(?:run|running|jog|jogging|cycling|exercis(?:e|ing))\s+(?:outside|outdoors))\b|बाहर\s*(?:दौड़|सैर|व्यायाम|कसरत)|व्यायाम|कसरत/i;
+
+/**
+ * Compute deterministic SHA-256 hex digest of a JSON-serializable payload.
+ * @param {unknown} payload
+ * @returns {string}
+ */
+function sha256Hex(payload) {
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
 
 /**
  * Validate Gemini model name against strict allowlist regex.
@@ -113,15 +128,12 @@ function parseCap(raw, fallback) {
 }
 
 /**
- * Check a single sentence/clause for positive unsafe recommendations.
+ * Check whether a single clause mentions any prohibited hazard topic.
  * @param {string} clause
  * @param {number} naqi
  * @returns {boolean}
  */
-function clauseViolatesSafety(clause, naqi) {
-  if (NEGATION_REGEX.test(clause)) {
-    return false;
-  }
+function mentionsProhibitedTopic(clause, naqi) {
   if (SAFETY_LIMITS.INFANT_MASK_FORBIDDEN && INFANT_MENTION_REGEX.test(clause) && MASK_MENTION_REGEX.test(clause)) {
     return true;
   }
@@ -131,10 +143,23 @@ function clauseViolatesSafety(clause, naqi) {
   if (WASH_VERB_REGEX.test(clause) && MASK_MENTION_REGEX.test(clause)) {
     return true;
   }
-  if (naqi > 400 && SEVERE_EXERCISE_MENTION_REGEX.test(clause)) {
+  return naqi > 400 && SEVERE_EXERCISE_MENTION_REGEX.test(clause);
+}
+
+/**
+ * Check a single sentence/clause for positive unsafe recommendations or double-negatives.
+ * @param {string} clause
+ * @param {number} naqi
+ * @returns {boolean}
+ */
+function clauseViolatesSafety(clause, naqi) {
+  if (!mentionsProhibitedTopic(clause, naqi)) {
+    return false;
+  }
+  if (DOUBLE_NEGATIVE_REGEX.test(clause)) {
     return true;
   }
-  return false;
+  return !SAFE_PROHIBITION_REGEX.test(clause);
 }
 
 /**
@@ -148,7 +173,7 @@ function violatesSafetyOrSanity(text, naqi, extraSecrets) {
   if (UNSAFE_HTML_REGEX.test(text) || redactSecrets(text, extraSecrets) !== text) {
     return true;
   }
-  const clauses = text.split(/[.!?।\n;]+/);
+  const clauses = text.split(/[,.;!?\n।]+/);
   return clauses.some((clause) => clauseViolatesSafety(clause, naqi));
 }
 
@@ -391,8 +416,9 @@ export function createGeminiService(deps = {}) {
           }
         },
         {
-          signal: AbortSignal.timeout(8000),
-          timeout_ms: 8000
+          signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+          timeout_ms: GEMINI_TIMEOUT_MS,
+          retries: { strategy: 'none' }
         }
       );
 
@@ -409,78 +435,89 @@ export function createGeminiService(deps = {}) {
     }
   }
 
+  function buildSnapshotKeyPart(snapshot) {
+    const loc = snapshot.location || {};
+    const cur = snapshot.current || {};
+    return {
+      city: loc.city ?? null,
+      lat: loc.lat ?? null,
+      lon: loc.lon ?? null,
+      pm25: cur.pm25 ?? null,
+      naqi: cur.naqi ?? null,
+      ventilationWindow: snapshot.ventilationWindow ?? null
+    };
+  }
+
+  function buildPlanCoalesceKey(snapshot, impact, validated) {
+    const box = impact.indoorBox || {};
+    const optFields = ['roomVolumeM3', 'outdoorHours', 'dailyKm', 'commuteDaysPerWeek', 'commuteFrom', 'commuteTo'];
+    const optional = Object.fromEntries(optFields.map((f) => [f, validated[f] ?? null]));
+    optional.roomVolumeM3 = validated.roomVolumeM3 ?? box.roomVolumeM3 ?? null;
+    const flags = ['noExhaustTadka', 'indoorIncenseOrCoil', 'dryJhaduSweeping', 'sealed24hNoFlush'].map((f) =>
+      Boolean(validated[f])
+    );
+    return sha256Hex({
+      kind: 'plan',
+      lang: validated.lang,
+      profile: validated.profile || impact.profile,
+      profiles: validated.profiles,
+      maskType: validated.maskType,
+      purifierMode: validated.purifierMode,
+      optional,
+      flags,
+      communityActions: validated.communityActions || [],
+      snapshot: buildSnapshotKeyPart(snapshot)
+    });
+  }
+
   async function enhancePlan({ snapshot, impact, baselinePlan, validated }) {
-    const key = JSON.stringify([
-      'plan',
-      validated.lang,
-      snapshot.location.city,
-      snapshot.current.naqi,
-      snapshot.calibration?.observedPm25 ?? null,
-      validated.profiles,
-      validated.maskType,
-      validated.purifierMode,
-      impact.dose.totalMitigatedUg,
-      impact.co2eSavedKgPerWeek,
-      validated.communityActions
-    ]);
+    const key = buildPlanCoalesceKey(snapshot, impact, validated);
+    const inputPayload = {
+      lang: validated.lang,
+      city: snapshot.location.city,
+      current: snapshot.current,
+      ventilationWindow: snapshot.ventilationWindow,
+      peakSmogWindow: snapshot.peakSmogWindow,
+      whatChangedToday: snapshot.whatChangedToday,
+      impactSummary: {
+        profile: impact.profile,
+        dose: impact.dose,
+        indoorBox: impact.indoorBox,
+        co2eSavedKgPerWeek: impact.co2eSavedKgPerWeek,
+        pm25AvoidedGPerWeek: impact.pm25AvoidedGPerWeek,
+        communityMultipliers: impact.communityMultipliers
+      },
+      baselinePlan: {
+        headlinePlainEnglish: baselinePlan.headlinePlainEnglish,
+        threeAnchorRoutine: baselinePlan.threeAnchorRoutine,
+        profileGuidance: baselinePlan.profileGuidance,
+        whatsappBrief: baselinePlan.commuteAndCommunity.whatsappBrief
+      },
+      safetyLimits: SAFETY_LIMITS
+    };
 
-    return runCoalesced(key, async () => {
-      const inputPayload = {
-        lang: validated.lang,
-        city: snapshot.location.city,
-        current: snapshot.current,
-        ventilationWindow: snapshot.ventilationWindow,
-        peakSmogWindow: snapshot.peakSmogWindow,
-        whatChangedToday: snapshot.whatChangedToday,
-        impactSummary: {
-          profile: impact.profile,
-          dose: impact.dose,
-          indoorBox: impact.indoorBox,
-          co2eSavedKgPerWeek: impact.co2eSavedKgPerWeek,
-          pm25AvoidedGPerWeek: impact.pm25AvoidedGPerWeek,
-          communityMultipliers: impact.communityMultipliers
-        },
-        baselinePlan: {
-          headlinePlainEnglish: baselinePlan.headlinePlainEnglish,
-          threeAnchorRoutine: baselinePlan.threeAnchorRoutine,
-          profileGuidance: baselinePlan.profileGuidance,
-          whatsappBrief: baselinePlan.commuteAndCommunity.whatsappBrief
-        },
-        safetyLimits: SAFETY_LIMITS
-      };
+    const res = await runCoalesced(key, () =>
+      invokeInteraction(STATIC_PLAN_SYSTEM_INSTRUCTION, inputPayload, PLAN_RESPONSE_SCHEMA)
+    );
+    const generatedAt = new Date(now()).toISOString();
 
-      const res = await invokeInteraction(STATIC_PLAN_SYSTEM_INSTRUCTION, inputPayload, PLAN_RESPONSE_SCHEMA);
-      if (!res.ok) {
-        return {
-          source: 'fallback',
-          fallbackReason: res.reason,
-          generatedAt: new Date(now()).toISOString(),
-          snapshot,
-          impact,
-          plan: baselinePlan
-        };
-      }
+    if (!res.ok) {
+      return { source: 'fallback', fallbackReason: res.reason, generatedAt, snapshot, impact, plan: baselinePlan };
+    }
 
-      const merged = mergeValidatedPlan(res.parsed, baselinePlan, Number(snapshot.current.naqi), [getApiKey()]);
-      if (!merged) {
-        return {
-          source: 'fallback',
-          fallbackReason: 'safety_or_schema_rejected',
-          generatedAt: new Date(now()).toISOString(),
-          snapshot,
-          impact,
-          plan: baselinePlan
-        };
-      }
-
+    const merged = mergeValidatedPlan(res.parsed, baselinePlan, Number(snapshot.current.naqi), [getApiKey()]);
+    if (!merged) {
       return {
-        source: 'gemini',
-        generatedAt: new Date(now()).toISOString(),
+        source: 'fallback',
+        fallbackReason: 'safety_or_schema_rejected',
+        generatedAt,
         snapshot,
         impact,
-        plan: merged
+        plan: baselinePlan
       };
-    });
+    }
+
+    return { source: 'gemini', generatedAt, snapshot, impact, plan: merged };
   }
 
   function buildChatFallback(res, { message, history, lang, snapshot, impact, naqi }) {
@@ -496,15 +533,28 @@ export function createGeminiService(deps = {}) {
     };
   }
 
+  function validateNoticeField(rawNotice, naqi, secrets) {
+    if (rawNotice === undefined || rawNotice === null) {
+      return { valid: true, value: undefined };
+    }
+    if (typeof rawNotice !== 'string') {
+      return { valid: false, value: undefined };
+    }
+    if (rawNotice.trim() === '') {
+      return { valid: true, value: undefined };
+    }
+    const clean = checkSafeString(rawNotice, 300, naqi, secrets);
+    return clean ? { valid: true, value: clean } : { valid: false, value: undefined };
+  }
+
   function buildChatResult(res, ctx) {
     if (!res.ok) {
       return buildChatFallback(res, ctx);
     }
     const secrets = [getApiKey()];
     const reply = checkSafeString(res.parsed?.reply, 1200, ctx.naqi, secrets);
-    const rawNotice = res.parsed?.safetyNotice;
-    const safetyNotice = rawNotice !== undefined ? checkSafeString(rawNotice, 300, ctx.naqi, secrets) : undefined;
-    if (!reply || (rawNotice !== undefined && !safetyNotice)) {
+    const noticeCheck = validateNoticeField(res.parsed?.safetyNotice, ctx.naqi, secrets);
+    if (!reply || !noticeCheck.valid) {
       return buildChatFallback(res, ctx);
     }
     return {
@@ -512,12 +562,11 @@ export function createGeminiService(deps = {}) {
       source: 'gemini',
       groundedNaqi: ctx.naqi,
       citedMetrics: ctx.citedMetrics,
-      ...(safetyNotice ? { safetyNotice } : {})
+      ...(noticeCheck.value ? { safetyNotice: noticeCheck.value } : {})
     };
   }
 
   async function answerChat({ message, history, lang, snapshot, impact }) {
-    const key = JSON.stringify(['chat', lang, snapshot.location.city, snapshot.current.naqi, message]);
     const naqi = Number(snapshot.current.naqi);
     const citedMetrics = {
       naqi,
@@ -525,32 +574,45 @@ export function createGeminiService(deps = {}) {
       ventilationWindow: snapshot.ventilationWindow.label,
       avoidedUg: Number(impact.dose.avoidedUg)
     };
-
-    return runCoalesced(key, async () => {
-      const inputPayload = {
-        lang,
-        message,
-        history,
-        snapshot: {
-          city: snapshot.location.city,
-          current: snapshot.current,
-          ventilationWindow: snapshot.ventilationWindow,
-          peakSmogWindow: snapshot.peakSmogWindow
-        },
-        impact: {
-          profile: impact.profile,
-          mask: impact.mask,
-          indoorBox: impact.indoorBox,
-          dose: impact.dose,
-          co2eSavedKgPerWeek: impact.co2eSavedKgPerWeek,
-          pm25AvoidedGPerWeek: impact.pm25AvoidedGPerWeek
-        },
-        safetyLimits: SAFETY_LIMITS
-      };
-
-      const res = await invokeInteraction(STATIC_CHAT_SYSTEM_INSTRUCTION, inputPayload, CHAT_RESPONSE_SCHEMA);
-      return buildChatResult(res, { message, history, lang, snapshot, impact, naqi, citedMetrics });
+    const key = sha256Hex({
+      kind: 'chat',
+      message,
+      history,
+      lang,
+      location: snapshot.location,
+      current: snapshot.current,
+      ventilationWindow: snapshot.ventilationWindow,
+      profile: impact.profile,
+      mask: impact.mask,
+      cInUgM3: impact.indoorBox?.cInUgM3 ?? null,
+      avoidedUg: impact.dose?.avoidedUg ?? null
     });
+
+    const inputPayload = {
+      lang,
+      message,
+      history,
+      snapshot: {
+        city: snapshot.location.city,
+        current: snapshot.current,
+        ventilationWindow: snapshot.ventilationWindow,
+        peakSmogWindow: snapshot.peakSmogWindow
+      },
+      impact: {
+        profile: impact.profile,
+        mask: impact.mask,
+        indoorBox: impact.indoorBox,
+        dose: impact.dose,
+        co2eSavedKgPerWeek: impact.co2eSavedKgPerWeek,
+        pm25AvoidedGPerWeek: impact.pm25AvoidedGPerWeek
+      },
+      safetyLimits: SAFETY_LIMITS
+    };
+
+    const res = await runCoalesced(key, () =>
+      invokeInteraction(STATIC_CHAT_SYSTEM_INSTRUCTION, inputPayload, CHAT_RESPONSE_SCHEMA)
+    );
+    return buildChatResult(res, { message, history, lang, snapshot, impact, naqi, citedMetrics });
   }
 
   return { enhancePlan, answerChat };

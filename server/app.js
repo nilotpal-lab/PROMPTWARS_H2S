@@ -176,14 +176,17 @@ export function createApp(deps = {}) {
         return;
       }
       const snapshot = await airQualityService.getAirQuality(check.data);
-      res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
+      res.setHeader(
+        'Cache-Control',
+        snapshot?.stale ? 'no-store' : 'public, s-maxage=300, stale-while-revalidate=900'
+      );
       res.json(snapshot);
     })
   );
 
   app.post(
     '/api/plan',
-    rateLimitMiddleware(aiLimiter, 'plan'),
+    rateLimitMiddleware(aiLimiter, 'ai'),
     asyncHandler(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const check = validatePlanRequest(req.body);
@@ -201,12 +204,13 @@ export function createApp(deps = {}) {
         calibratedPm25: v.calibratedPm25,
         lang: v.lang
       });
+      const focusProfile = v.profile ?? v.profiles?.[0] ?? 'commuter';
       const impact = calculateHouseholdImpact({
         ...v,
-        profile: v.profiles[0],
+        profile: focusProfile,
         outdoorPm25: Number(snapshot.current.pm25)
       });
-      const baselinePlan = generateDeterministicPlan({ snapshot, impact, ...v });
+      const baselinePlan = generateDeterministicPlan({ snapshot, impact, ...v, profile: focusProfile });
       const result = await geminiService.enhancePlan({ snapshot, impact, baselinePlan, validated: v });
       res.json(result);
     })
@@ -214,7 +218,7 @@ export function createApp(deps = {}) {
 
   app.post(
     '/api/chat',
-    rateLimitMiddleware(aiLimiter, 'chat'),
+    rateLimitMiddleware(aiLimiter, 'ai'),
     asyncHandler(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const check = validateChatRequest(req.body);
@@ -233,7 +237,7 @@ export function createApp(deps = {}) {
         calibratedPm25: ctx.calibratedPm25,
         lang: v.lang
       });
-      const profile = Array.isArray(ctx.profiles) && ctx.profiles[0] ? ctx.profiles[0] : (ctx.profile ?? 'commuter');
+      const profile = ctx.profile ?? (Array.isArray(ctx.profiles) && ctx.profiles[0]) ?? 'commuter';
       const impact = calculateHouseholdImpact({
         ...ctx,
         profile,
