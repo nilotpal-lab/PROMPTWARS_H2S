@@ -299,11 +299,50 @@ function mapMergedHour(aqHourly, wxByTime, idx, pm25Value) {
 }
 
 /**
- * Align and merge Open-Meteo 48h AQ + Weather hourly arrays into a 24h series from current IST hour.
+ * Compute yesterday's peak PM2.5 and matching-hour NAQI from the past-24h Open-Meteo slice.
+ * @param {Record<string, unknown[]>} aqHourly
+ * @param {number} pastStartIdx
+ * @param {number} pastEndIdx
+ * @param {string} nowKey
+ * @returns {{ peakPm25: number, naqi: number } | null}
+ */
+function computeYesterdaySummary(aqHourly, pastStartIdx, pastEndIdx, nowKey) {
+  if (pastEndIdx <= pastStartIdx) {
+    return null;
+  }
+  const pmSlots = extractWindowPm25(aqHourly.pm2_5, pastStartIdx, pastEndIdx);
+  const validPms = pmSlots.filter((v) => v !== null);
+  if (validPms.length === 0) {
+    return null;
+  }
+  const peakPm25 = Math.round(Math.max(...validPms));
+  const hourSuffix = nowKey.slice(11);
+  let refIdx = pastStartIdx;
+  for (let i = pastStartIdx; i < pastEndIdx; i += 1) {
+    if (String(aqHourly.time[i]).endsWith(hourSuffix) && pmSlots[i - pastStartIdx] !== null) {
+      refIdx = i;
+      break;
+    }
+  }
+  const refPm = pmSlots[refIdx - pastStartIdx] ?? validPms[0];
+  const naqi = computeNaqi({
+    pm25: refPm,
+    pm10: numOr(aqHourly.pm10?.[refIdx], 0),
+    no2: numOr(aqHourly.nitrogen_dioxide?.[refIdx], 0),
+    so2: numOr(aqHourly.sulphur_dioxide?.[refIdx], 0),
+    o3: numOr(aqHourly.ozone?.[refIdx], 0),
+    coUgM3: numOr(aqHourly.carbon_monoxide?.[refIdx], 0)
+  }).naqi;
+  return { peakPm25, naqi };
+}
+
+/**
+ * Align and merge Open-Meteo past_days=1 + forecast_days=2 AQ + Weather arrays into
+ * yesterday's summary (< nowKey) and a forward hourly48h series (>= nowKey).
  * @param {Record<string, unknown>} aqJson
  * @param {Record<string, unknown> | null} wxJson
  * @param {number} epochMs
- * @returns {Record<string, unknown>[]}
+ * @returns {{ hourly48h: Record<string, unknown>[], yesterday: { peakPm25: number, naqi: number } | null }}
  */
 function mergeOpenMeteoSeries(aqJson, wxJson, epochMs) {
   const aqHourly = aqJson?.hourly;
@@ -314,14 +353,17 @@ function mergeOpenMeteoSeries(aqJson, wxJson, epochMs) {
   const nowKey = getCurrentIstHourKey(epochMs);
   const foundIdx = aqHourly.time.findIndex((t) => String(t) >= nowKey);
   const startIdx = foundIdx >= 0 ? Math.min(foundIdx, Math.max(0, aqHourly.time.length - 24)) : 0;
-  const endIdx = Math.min(aqHourly.time.length, startIdx + 24);
+  const endIdx = Math.min(aqHourly.time.length, startIdx + 48);
+  const pastEndIdx = foundIdx >= 0 ? foundIdx : 0;
+  const pastStartIdx = Math.max(0, pastEndIdx - 24);
+  const yesterday = computeYesterdaySummary(aqHourly, pastStartIdx, pastEndIdx, nowKey);
   const pm25Series = interpolatePm25Slots(extractWindowPm25(aqHourly.pm2_5, startIdx, endIdx));
-  const merged = [];
+  const hourly48h = [];
 
   for (let i = startIdx; i < endIdx; i += 1) {
-    merged.push(mapMergedHour(aqHourly, wxByTime, i, pm25Series[i - startIdx]));
+    hourly48h.push(mapMergedHour(aqHourly, wxByTime, i, pm25Series[i - startIdx]));
   }
-  return merged;
+  return { hourly48h, yesterday };
 }
 
 /**
@@ -394,7 +436,21 @@ function parseCpcbPm25Value(rec) {
 }
 
 /**
+ * Parse a finite coordinate value, treating null/empty strings as missing.
+ * @param {unknown} raw
+ * @returns {number | null}
+ */
+function parseCoord(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return null;
+  }
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
  * Score a single CPCB data.gov.in record for PM2.5 proximity to target city/coords.
+ * Missing coordinates (dist === 99) with city match score 0.6 so real nearby stations (<= 0.5 deg) always win.
  * @param {Record<string, unknown>} rec
  * @param {number} lat
  * @param {number} lon
@@ -406,18 +462,37 @@ function scoreCpcbRecord(rec, lat, lon, cityToken) {
   if (val === null) {
     return null;
   }
-  const rLat = Number(rec.latitude);
-  const rLon = Number(rec.longitude);
-  const dist = Number.isFinite(rLat) && Number.isFinite(rLon) ? Math.hypot(rLat - lat, rLon - lon) : 99;
+  const rLat = parseCoord(rec.latitude);
+  const rLon = parseCoord(rec.longitude);
+  const dist = rLat !== null && rLon !== null ? Math.hypot(rLat - lat, rLon - lon) : 99;
   const cityMatch = cityToken.length > 0 && String(rec.city ?? '').toLowerCase().includes(cityToken);
   if (dist > 0.8 && !cityMatch) {
     return null;
   }
+  const scoredDist = cityMatch ? (dist === 99 ? 0.6 : Math.min(dist, 0.2)) : dist;
   return {
-    dist: cityMatch ? Math.min(dist, 0.2) : dist,
+    dist: scoredDist,
     val,
     station: String(rec.station ?? rec.city ?? 'CPCB CAAQMS')
   };
+}
+
+/**
+ * Validate an external attribution URL as strict HTTPS, falling back safely otherwise.
+ * @param {unknown} rawUrl
+ * @param {string} fallback
+ * @returns {string}
+ */
+function sanitizeHttpsUrl(rawUrl, fallback = 'https://waqi.info') {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(rawUrl.trim());
+    return parsed.protocol === 'https:' ? parsed.toString() : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -439,6 +514,24 @@ function extractNearestCpcbPm25(records, lat, lon, cityName) {
 }
 
 /**
+ * Normalize WAQI attribution list, rejecting any non-HTTPS URLs.
+ * @param {unknown} rawAttrs
+ * @returns {{ name: string, url: string }[]}
+ */
+function parseWaqiAttributions(rawAttrs) {
+  if (!Array.isArray(rawAttrs)) {
+    return [{ name: 'World Air Quality Index (WAQI)', url: 'https://waqi.info' }];
+  }
+  const parsed = rawAttrs
+    .filter((a) => a && typeof a === 'object')
+    .map((a) => ({
+      name: String(a.name ?? 'WAQI'),
+      url: sanitizeHttpsUrl(a.url, 'https://waqi.info')
+    }));
+  return parsed.length > 0 ? parsed : [{ name: 'World Air Quality Index (WAQI)', url: 'https://waqi.info' }];
+}
+
+/**
  * Parse WAQI JSON payload and convert US EPA PM2.5 AQI to ug/m3.
  * @param {Record<string, unknown>} json
  * @returns {{ pm25UgM3: number, stationName: string, attributions: { name: string, url: string }[] } | null}
@@ -448,14 +541,10 @@ function parseWaqiPayload(json) {
   if (json?.status !== 'ok' || !Number.isFinite(aqiVal) || aqiVal <= 0) {
     return null;
   }
-  const rawAttrs = json.data.attributions;
-  const attributions = Array.isArray(rawAttrs)
-    ? rawAttrs.map((a) => ({ name: String(a.name ?? 'WAQI'), url: String(a.url ?? 'https://waqi.info') }))
-    : [{ name: 'World Air Quality Index (WAQI)', url: 'https://waqi.info' }];
   return {
     pm25UgM3: usEpaPm25AqiToUgM3(aqiVal),
     stationName: String(json.data.city?.name ?? 'WAQI Nearest Station'),
-    attributions
+    attributions: parseWaqiAttributions(json.data.attributions)
   };
 }
 
@@ -495,8 +584,8 @@ export function createAirQualityService(deps = {}) {
         const picked = pickBestGeoResult(await res.json().then((j) => j?.results));
         if (picked) {
           cache.set(geoKey, picked, GEO_TTL_MS);
-          return picked;
         }
+        return picked;
       }
     } catch {
       // Fallback to built-in Indian city table if geocoding fails or is offline
@@ -509,6 +598,7 @@ export function createAirQualityService(deps = {}) {
     const aqParams = new URLSearchParams({
       latitude: String(lat),
       longitude: String(lon),
+      past_days: '1',
       forecast_days: '2',
       timezone: 'Asia/Kolkata',
       hourly: 'pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone'
@@ -516,6 +606,7 @@ export function createAirQualityService(deps = {}) {
     const wxParams = new URLSearchParams({
       latitude: String(lat),
       longitude: String(lon),
+      past_days: '1',
       forecast_days: '2',
       timezone: 'Asia/Kolkata',
       hourly: 'boundary_layer_height,wind_speed_10m,relative_humidity_2m'
@@ -560,7 +651,7 @@ export function createAirQualityService(deps = {}) {
     const params = new URLSearchParams({
       'api-key': key,
       format: 'json',
-      limit: '100',
+      limit: '250',
       'filters[pollutant_id]': 'PM2.5'
     });
     if (filterCity) {
@@ -619,8 +710,8 @@ export function createAirQualityService(deps = {}) {
       lon: resolvedLon,
       presetId: payload.presetId,
       source: payload.source,
-      hourly24h: payload.hourly24h,
-      yesterday: query.yesterday,
+      ...(payload.hourly48h ? { hourly48h: payload.hourly48h } : { hourly24h: payload.hourly24h }),
+      yesterday: query.yesterday ?? payload.yesterday ?? null,
       ...(hasUserCal
         ? {
             calibratedPm25: query.calibratedPm25,
@@ -641,6 +732,7 @@ export function createAirQualityService(deps = {}) {
       calibration: snapshot.calibration,
       ventilationWindow: windows.ventilationWindow,
       peakSmogWindow: windows.peakSmogWindow,
+      tomorrowWindow: snapshot.tomorrowWindow,
       whatChangedToday: snapshot.whatChangedToday,
       hourly24h: snapshot.hourly24h,
       regionalContext: payload.regionalContext
@@ -732,13 +824,14 @@ export function createAirQualityService(deps = {}) {
 
   async function fetchLiveWithFallback(target, query, cacheKey) {
     try {
-      const [hourly24h, optional] = await Promise.all([
+      const [tier0, optional] = await Promise.all([
         fetchTier0(target.lat, target.lon),
         fetchOptionalTiers(target.lat, target.lon, target.city, target.cpcbCity)
       ]);
       // Omit request-specific city strings from coordinate cache to prevent cache poisoning
       const livePayload = {
-        hourly24h,
+        hourly48h: tier0.hourly48h,
+        yesterday: tier0.yesterday,
         lat: target.lat,
         lon: target.lon,
         presetId: null,
@@ -777,18 +870,14 @@ export function createAirQualityService(deps = {}) {
 
     const target = await resolveTargetCoordinates(query);
     if (!target) {
-      return assembleResponse(
-        buildPresetPayload('delhi-severe', {
-          city: query.city ?? 'Delhi (Fallback)',
-          source: 'fallback-preset',
-          sourceTier: 'fallback-preset',
-          stale: true
-        }),
-        query
-      );
+      const err = new Error('City not found');
+      err.statusCode = 404;
+      err.code = 'CITY_NOT_FOUND';
+      throw err;
     }
 
-    const cacheKey = `aqi:${target.lat.toFixed(2)}:${target.lon.toFixed(2)}`;
+    const cpcbCityKey = target.cpcbCity ? target.cpcbCity.toLowerCase() : 'geo';
+    const cacheKey = `aqi:${target.lat.toFixed(2)}:${target.lon.toFixed(2)}:${cpcbCityKey}`;
     const cachedFresh = cache.get(cacheKey);
     return cachedFresh
       ? assembleResponse(cachedFresh, query, target)

@@ -188,12 +188,46 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
     assert.doesNotMatch(capturedSystemInstruction, /Ignore rules|onerror/i);
     assert.doesNotMatch(capturedLlmInput, /<img|>/i);
 
+    // /api/chat with omitted context (ctx.profiles === undefined) must default profile to 'commuter' (never false)
+    const noCtxChat = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Best time to open windows?', lang: 'en' })
+    });
+    assert.equal(noCtxChat.status, 200);
+    const parsedNoCtxInput = JSON.parse(capturedLlmInput);
+    assert.equal(parsedNoCtxInput.impact.profile, 'commuter');
+
     const protoPlan = await fetch(`${baseUrl}/api/plan`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{"__proto__":{"isAdmin":true}}'
     });
     assert.equal(protoPlan.status, 400);
+  });
+
+  it('returns 404 CITY_NOT_FOUND for unknown city without masking as Delhi', async () => {
+    const unknownApp = createApp({
+      airQualityService: createAirQualityService({
+        fetchImpl: async (url) => {
+          if (url.startsWith('https://geocoding-api.open-meteo.com')) {
+            return new Response(JSON.stringify({ results: [] }));
+          }
+          return new Response('{}', { status: 404 });
+        }
+      })
+    });
+    const started = await listenEphemeral(unknownApp);
+    try {
+      const res = await fetch(`${started.baseUrl}/api/aqi?city=XyzzyUnknownPlace`);
+      assert.equal(res.status, 404);
+      assert.equal(res.headers.get('cache-control'), 'no-store');
+      const body = await res.json();
+      assert.equal(body.error.code, 'CITY_NOT_FOUND');
+      assert.equal(body.error.message, 'City not found. Try a major Indian city or select a preset.');
+    } finally {
+      await new Promise((resolve) => started.server.close(resolve));
+    }
   });
 
   it('returns 400 for invalid JSON, 413 for >16kb payloads, 404 for unknown routes, and masks secret errors', async () => {
@@ -274,9 +308,21 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
     }
   });
 
-  it('serves static public/ locally, disables static serving when VERCEL=1, and keeps api/index.js & server/index.js import-safe', async () => {
+  it('serves static public/ locally with Cache-Control & ETag, disables static serving when VERCEL=1, trusts Fly/Render proxies, and keeps api/index.js & server/index.js import-safe', async () => {
     const localFavicon = await fetch(`${baseUrl}/favicon.svg`);
     assert.equal(localFavicon.status, 200);
+    assert.match(localFavicon.headers.get('cache-control') ?? '', /max-age=3600/);
+    assert.ok(localFavicon.headers.get('etag'));
+
+    const flyApp = createApp({ env: { FLY_APP_NAME: 'vayumitra-fly' } });
+    assert.equal(flyApp.get('trust proxy'), 1);
+    const renderApp = createApp({ env: { RENDER: 'true' } });
+    assert.equal(renderApp.get('trust proxy'), 1);
+
+    const upstashApp = createApp({
+      env: { UPSTASH_REDIS_REST_URL: 'https://upstash.invalid', UPSTASH_REDIS_REST_TOKEN: 'secret-redis-tok' }
+    });
+    assert.equal(typeof upstashApp.handle, 'function');
 
     const vercelApp = createApp({ env: { VERCEL: '1' } });
     const started = await listenEphemeral(vercelApp);

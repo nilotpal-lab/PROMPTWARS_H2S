@@ -5,13 +5,14 @@
  */
 
 import { createHash } from 'node:crypto';
-import { GoogleGenAI } from '@google/genai';
 import { SAFETY_LIMITS, generateFallbackChatReply } from '../lib/recommender.js';
+import { createTtlCache } from './cache.js';
 import { redactSecrets } from './httpClient.js';
 
-const DEFAULT_MODEL = 'gemini-4-hydrogen';
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const MODEL_NAME_REGEX = /^gemini-[a-z0-9.-]+$/;
 const GEMINI_TIMEOUT_MS = 6500;
+const PLAN_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const STATIC_PLAN_SYSTEM_INSTRUCTION = [
   'You are VayuMitra, a calm, physics-honest urban air quality coach for Indian households.',
@@ -84,16 +85,23 @@ const CHAT_RESPONSE_SCHEMA = {
 };
 
 const UNSAFE_HTML_REGEX = /<[a-z!/]|javascript:|onerror\s*=|onload\s*=/i;
+const SUB_CLAUSE_SPLIT_REGEX = /[,.;!?\n।]+|\b(?:and|but|while|or|also|unless|except|और|लेकिन|पर)\b/gi;
 const DOUBLE_NEGATIVE_REGEX =
   /\b(?:not\s+hesitate|don't\s+hesitate|do\s+not\s+hesitate|don't\s+skip|do\s+not\s+skip|never\s+skip|no\s+problem|no\s+harm|no\s+issue|safe\s+to|okay\s+to|fine\s+to)\b/i;
-const SAFE_PROHIBITION_REGEX =
-  /\b(?:never\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|recommend|exercise|jog|cycle)|do\s+not\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|exercise|jog|cycle)|don't\s+(?:put|place|use|wear|wash|boil|soak|run|buy|try|exercise|jog|cycle)|no\s+mask(?:s)?\b|mask\s+forbidden|avoid|disable|skip|stop|cancel|turn\s+off|harmful|destructive|myth|false)\b|मास्क\s+न|न\s+पहनाएं|मना|बंद|मत|बचें|कभी\s+नहीं|धोएं\s+नहीं|न\s+धोएं|खतरनाक|गलत|भ्रम|रद्द|टालें|(?:^|\s)न(?:\s|$)/iu;
-const INFANT_MENTION_REGEX = /\b(?:infant|baby|toddler|newborn)s?\b|शिशु|नवजात/i;
-const MASK_MENTION_REGEX = /\b(?:mask|n95|kn95)s?\b|मास्क/i;
-const OZONE_MENTION_REGEX = /\b(?:ozone|ionizer)s?\b|ओज़ोन|आयोनाइज़र/i;
-const WASH_VERB_REGEX = /\b(?:wash|washing|boil|boiling|soak|soap)\b|धोने|उबालने/i;
+const SAFE_EN_PROHIBITION_REGEX =
+  /\b(?:never\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|recommend|exercise|jog|cycle|do|go|allow|let)|do\s+not\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|exercise|jog|cycle|do|go|allow|let)|don't\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|exercise|jog|cycle|do|go|allow|let)|no\s+(?:masks?|ozone|ionizers?|plasma|outdoor\s+(?:exercise|jog|run))\b|mask\s+forbidden|avoid|disable|skip|stop|cancel|turn\s+off|harmful|destructive|myth|false)\b/gi;
+const SAFE_HI_PROHIBITION_REGEX =
+  /मास्क\s+न|न\s+पहनाएं|मना|बंद|मत|बचें|कभी\s+नहीं|धोएं\s+नहीं|न\s+धोएं|खतरनाक|गलत|भ्रम|रद्द|टालें|(?:^|\s)न(?:\s|$)/giu;
+const INFANT_MENTION_REGEX =
+  /\b(?:infants?|bab(?:y|ies)|newborns?|toddlers?|under\s*(?:2|two)|1-year-old)\b|शिशु|नवजात|2\s*(?:साल|वर्ष)\s*से\s*(?:कम|छोट[ेा])/i;
+const MASK_MENTION_REGEX = /\b(?:masks?|n95s?|kn95s?|respirators?|face\s+coverings?)\b|मास्क/i;
+const OZONE_MENTION_REGEX = /\b(?:ozone|ionizers?|plasma)\b|ओज़ोन|आयोनाइज़र/i;
+const WASH_VERB_REGEX =
+  /\b(?:wash(?:ing|ed)?|rins(?:e|ing)|launder(?:ing)?|soap|boil(?:ing|ed)?|soak(?:ing)?)\b|धो(?:ना|ने|एं)?|उबाल(?:ना|ने)?/i;
 const SEVERE_EXERCISE_MENTION_REGEX =
-  /\b(?:outdoor\s+(?:run|running|jog|jogging|cycling|exercise|workout|sports)|(?:run|running|jog|jogging|cycling|exercis(?:e|ing))\s+(?:outside|outdoors))\b|बाहर\s*(?:दौड़|सैर|व्यायाम|कसरत)|व्यायाम|कसरत/i;
+  /\b(?:outdoor\s+(?:run|running|jog|jogging|cycling|exercise|workout|sports)|morning\s+jog|park\s+run|(?:run|running|jog|jogging|cycling|exercis(?:e|ing))\s+(?:outside|outdoors))\b|बाहर\s*(?:दौड़|सैर|व्यायाम|कसरत)|व्यायाम|कसरत/i;
+const INDOOR_EXEMPT_REGEX = /\b(?:indoors?)\b|घर\s*के\s*अंदर/i;
+const EXPLICIT_OUTDOOR_REGEX = /\b(?:outdoor|outdoors|outside|park\s+run|morning\s+jog)\b|बाहर/i;
 
 /**
  * Compute deterministic SHA-256 hex digest of a JSON-serializable payload.
@@ -128,38 +136,78 @@ function parseCap(raw, fallback) {
 }
 
 /**
- * Check whether a single clause mentions any prohibited hazard topic.
+ * Collect risky match descriptors for prohibited topics in a single sub-clause.
  * @param {string} clause
  * @param {number} naqi
- * @returns {boolean}
+ * @returns {RegExpExecArray[]}
  */
-function mentionsProhibitedTopic(clause, naqi) {
-  if (SAFETY_LIMITS.INFANT_MASK_FORBIDDEN && INFANT_MENTION_REGEX.test(clause) && MASK_MENTION_REGEX.test(clause)) {
-    return true;
+function collectRiskyMatches(clause, naqi) {
+  const matches = [];
+  if (SAFETY_LIMITS.INFANT_MASK_FORBIDDEN) {
+    const infantMatch = INFANT_MENTION_REGEX.exec(clause);
+    const maskMatch = MASK_MENTION_REGEX.exec(clause);
+    if (infantMatch && maskMatch) {
+      matches.push(maskMatch);
+    }
   }
-  if (OZONE_MENTION_REGEX.test(clause)) {
-    return true;
+  const ozoneMatch = OZONE_MENTION_REGEX.exec(clause);
+  if (ozoneMatch) {
+    matches.push(ozoneMatch);
   }
-  if (WASH_VERB_REGEX.test(clause) && MASK_MENTION_REGEX.test(clause)) {
-    return true;
+  const washMatch = WASH_VERB_REGEX.exec(clause);
+  if (washMatch && MASK_MENTION_REGEX.test(clause)) {
+    matches.push(washMatch);
   }
-  return naqi > 400 && SEVERE_EXERCISE_MENTION_REGEX.test(clause);
+  if (naqi > 400) {
+    const isSafeIndoor = INDOOR_EXEMPT_REGEX.test(clause) && !EXPLICIT_OUTDOOR_REGEX.test(clause);
+    const exerciseMatch = !isSafeIndoor ? SEVERE_EXERCISE_MENTION_REGEX.exec(clause) : null;
+    if (exerciseMatch) {
+      matches.push(exerciseMatch);
+    }
+  }
+  return matches;
 }
 
 /**
- * Check a single sentence/clause for positive unsafe recommendations or double-negatives.
+ * Verify a risky match is governed by a safe prohibition token in the same sub-clause
+ * (within 45 chars BEFORE the risky token in English, or within 45 chars in Hindi SOV).
+ * @param {string} clause
+ * @param {RegExpExecArray} match
+ * @returns {boolean}
+ */
+function hasLocalSafeProhibition(clause, match) {
+  const targetStart = match.index;
+  const targetEnd = targetStart + match[0].length;
+  for (const m of clause.matchAll(SAFE_EN_PROHIBITION_REGEX)) {
+    const pEnd = (m.index ?? 0) + m[0].length;
+    if (targetStart - pEnd >= 0 && targetStart - pEnd <= 45) {
+      return true;
+    }
+  }
+  for (const m of clause.matchAll(SAFE_HI_PROHIBITION_REGEX)) {
+    const pStart = m.index ?? 0;
+    if (pStart >= targetStart - 45 && pStart <= targetEnd + 45) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check a single sub-clause for positive unsafe recommendations or double-negatives.
  * @param {string} clause
  * @param {number} naqi
  * @returns {boolean}
  */
-function clauseViolatesSafety(clause, naqi) {
-  if (!mentionsProhibitedTopic(clause, naqi)) {
+export function clauseViolatesSafety(clause, naqi) {
+  const matches = collectRiskyMatches(clause, naqi);
+  if (matches.length === 0) {
     return false;
   }
   if (DOUBLE_NEGATIVE_REGEX.test(clause)) {
     return true;
   }
-  return !SAFE_PROHIBITION_REGEX.test(clause);
+  return matches.some((m) => !hasLocalSafeProhibition(clause, m));
 }
 
 /**
@@ -173,7 +221,7 @@ function violatesSafetyOrSanity(text, naqi, extraSecrets) {
   if (UNSAFE_HTML_REGEX.test(text) || redactSecrets(text, extraSecrets) !== text) {
     return true;
   }
-  const clauses = text.split(/[,.;!?\n।]+/);
+  const clauses = text.split(SUB_CLAUSE_SPLIT_REGEX).filter((c) => c && c.trim().length > 0);
   return clauses.some((clause) => clauseViolatesSafety(clause, naqi));
 }
 
@@ -334,7 +382,8 @@ export function createGeminiService(deps = {}) {
   const model = resolveValidModel(env.GEMINI_MODEL);
   const dailyCap = parseCap(env.GEMINI_DAILY_CAP, 400);
   const rpmCap = parseCap(env.GEMINI_RPM_CAP, 20);
-  const clientFactory = deps.clientFactory ?? (({ apiKey }) => new GoogleGenAI({ apiKey }));
+  const customClientFactory = typeof deps.clientFactory === 'function' ? deps.clientFactory : null;
+  const planCache = createTtlCache({ maxEntries: 100, now });
 
   let clientInstance = null;
   let currentDay = '';
@@ -362,13 +411,18 @@ export function createGeminiService(deps = {}) {
     return true;
   }
 
-  function getClient() {
+  async function getClient() {
     const apiKey = getApiKey();
     if (!apiKey) {
       return null;
     }
     if (!clientInstance) {
-      clientInstance = clientFactory({ apiKey });
+      if (customClientFactory) {
+        clientInstance = customClientFactory({ apiKey });
+      } else {
+        const { GoogleGenAI } = await import('@google/genai');
+        clientInstance = new GoogleGenAI({ apiKey });
+      }
     }
     return clientInstance;
   }
@@ -394,7 +448,7 @@ export function createGeminiService(deps = {}) {
   }
 
   async function invokeInteraction(systemInstruction, inputPayload, schema) {
-    const client = getClient();
+    const client = await getClient();
     if (!client) {
       return { ok: false, reason: 'missing_api_key' };
     }
@@ -472,6 +526,10 @@ export function createGeminiService(deps = {}) {
 
   async function enhancePlan({ snapshot, impact, baselinePlan, validated }) {
     const key = buildPlanCoalesceKey(snapshot, impact, validated);
+    const cached = planCache.get(key);
+    if (cached) {
+      return { ...cached, snapshot, impact };
+    }
     const inputPayload = {
       lang: validated.lang,
       city: snapshot.location.city,
@@ -517,7 +575,9 @@ export function createGeminiService(deps = {}) {
       };
     }
 
-    return { source: 'gemini', generatedAt, snapshot, impact, plan: merged };
+    const verifiedResult = { source: 'gemini', generatedAt, snapshot, impact, plan: merged };
+    planCache.set(key, verifiedResult, PLAN_CACHE_TTL_MS);
+    return verifiedResult;
   }
 
   function buildChatFallback(res, { message, history, lang, snapshot, impact, naqi }) {

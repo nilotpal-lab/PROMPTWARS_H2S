@@ -11,7 +11,7 @@ import { calculateHouseholdImpact } from '../lib/impact.js';
 import { generateDeterministicPlan } from '../lib/recommender.js';
 import { validateAqiQuery, validateChatRequest, validatePlanRequest } from '../lib/validation.js';
 import { createAirQualityService } from './airQualityService.js';
-import { createSlidingRateLimiter } from './cache.js';
+import { createDistributedRateLimiter, createSlidingRateLimiter } from './cache.js';
 import { createGeminiService } from './geminiService.js';
 import { redactSecrets } from './httpClient.js';
 
@@ -48,21 +48,21 @@ function sendError(res, status, code, message, retryAfterSec) {
 
 /**
  * Build rate-limiting Express middleware for a specific limiter bucket.
- * @param {ReturnType<typeof createSlidingRateLimiter>} limiter
+ * @param {ReturnType<typeof createSlidingRateLimiter> | ReturnType<typeof createDistributedRateLimiter>} limiter
  * @param {string} prefix
  * @returns {express.RequestHandler}
  */
 function rateLimitMiddleware(limiter, prefix) {
-  return (req, res, next) => {
+  return asyncHandler(async (req, res, next) => {
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-    const result = limiter.consume(`${prefix}:${ip}`);
+    const result = await limiter.consume(`${prefix}:${ip}`);
     if (!result.allowed) {
       res.setHeader('Retry-After', String(result.retryAfterSec));
       sendError(res, 429, 'RATE_LIMITED', 'Too many requests; please retry shortly.', result.retryAfterSec);
       return;
     }
     next();
-  };
+  });
 }
 
 /**
@@ -90,13 +90,45 @@ function applySecurityMiddleware(app) {
       },
       frameguard: { action: 'deny' },
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-      hsts: false
+      hsts: { maxAge: 63072000, includeSubDomains: true, preload: false }
     })
   );
   app.use((_req, res, next) => {
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
     next();
   });
+}
+
+/**
+ * Check whether an error came from Express JSON body parsing.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isJsonSyntaxError(err) {
+  return err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err?.status === 400);
+}
+
+/**
+ * Handle known structured HTTP error conditions (404 city, 413 payload, 400 JSON).
+ * @param {unknown} err
+ * @param {express.Response} res
+ * @returns {boolean}
+ */
+function handleKnownHttpError(err, res) {
+  if (err?.code === 'CITY_NOT_FOUND' || err?.statusCode === 404) {
+    res.setHeader('Cache-Control', 'no-store');
+    sendError(res, 404, 'CITY_NOT_FOUND', 'City not found. Try a major Indian city or select a preset.');
+    return true;
+  }
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Request payload exceeds 16kb limit');
+    return true;
+  }
+  if (isJsonSyntaxError(err)) {
+    sendError(res, 400, 'INVALID_JSON', 'Malformed JSON payload');
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -106,17 +138,64 @@ function applySecurityMiddleware(app) {
  */
 function applyErrorMiddleware(app, secrets) {
   app.use((err, _req, res, _next) => {
-    if (err?.type === 'entity.too.large' || err?.status === 413) {
-      sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Request payload exceeds 16kb limit');
-      return;
-    }
-    if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err?.status === 400)) {
-      sendError(res, 400, 'INVALID_JSON', 'Malformed JSON payload');
+    if (handleKnownHttpError(err, res)) {
       return;
     }
     const safeMsg = redactSecrets(err instanceof Error ? err.message : String(err), secrets);
     console.error('Unhandled API error:', safeMsg);
     sendError(res, 500, 'INTERNAL_ERROR', 'Unexpected server error');
+  });
+}
+
+/**
+ * Check whether Express should trust X-Forwarded-* headers for known reverse proxies.
+ * @param {Record<string, string | undefined>} env
+ * @returns {boolean}
+ */
+function shouldTrustProxy(env) {
+  return (
+    env.VERCEL === '1' ||
+    env.TRUST_PROXY === '1' ||
+    Boolean(env.FLY_APP_NAME) ||
+    Boolean(env.RENDER)
+  );
+}
+
+/**
+ * Collect configured secret env values for error redaction.
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
+function collectEnvSecrets(env) {
+  return [
+    env.GEMINI_API_KEY,
+    env.WAQI_API_KEY,
+    env.DATA_GOV_IN_API_KEY,
+    env.NASA_FIRMS_MAP_KEY,
+    env.UPSTASH_REDIS_REST_TOKEN
+  ].filter(Boolean);
+}
+
+/**
+ * Build either an Upstash distributed rate limiter (when configured) or an in-memory sliding limiter.
+ * @param {Record<string, string | undefined>} env
+ * @param {() => number} now
+ * @param {number} maxRequests
+ */
+function buildRateLimiter(env, now, maxRequests) {
+  const fallbackLimiter = createSlidingRateLimiter({ windowMs: 60_000, maxRequests, now });
+  const redisUrl = (env.UPSTASH_REDIS_REST_URL ?? '').trim();
+  const redisToken = (env.UPSTASH_REDIS_REST_TOKEN ?? '').trim();
+  if (!redisUrl || !redisToken) {
+    return fallbackLimiter;
+  }
+  return createDistributedRateLimiter({
+    redisUrl,
+    redisToken,
+    windowMs: 60_000,
+    maxRequests,
+    fallbackLimiter,
+    now
   });
 }
 
@@ -138,18 +217,13 @@ export function createApp(deps = {}) {
   const now = typeof deps.now === 'function' ? deps.now : () => Date.now();
   const airQualityService = deps.airQualityService ?? createAirQualityService({ env, now });
   const geminiService = deps.geminiService ?? createGeminiService({ env, now });
-  const aqiLimiter = deps.aqiLimiter ?? createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 60, now });
-  const aiLimiter = deps.aiLimiter ?? createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 15, now });
+  const aqiLimiter = deps.aqiLimiter ?? buildRateLimiter(env, now, 60);
+  const aiLimiter = deps.aiLimiter ?? buildRateLimiter(env, now, 15);
   const publicDir = deps.publicDir ?? DEFAULT_PUBLIC_DIR;
-  const secrets = [
-    env.GEMINI_API_KEY,
-    env.WAQI_API_KEY,
-    env.DATA_GOV_IN_API_KEY,
-    env.NASA_FIRMS_MAP_KEY
-  ].filter(Boolean);
+  const secrets = collectEnvSecrets(env);
 
   const app = express();
-  if (env.VERCEL === '1' || env.TRUST_PROXY === '1') {
+  if (shouldTrustProxy(env)) {
     app.set('trust proxy', 1);
   }
 
@@ -237,7 +311,7 @@ export function createApp(deps = {}) {
         calibratedPm25: ctx.calibratedPm25,
         lang: v.lang
       });
-      const profile = ctx.profile ?? (Array.isArray(ctx.profiles) && ctx.profiles[0]) ?? 'commuter';
+      const profile = ctx.profile ?? (Array.isArray(ctx.profiles) ? ctx.profiles[0] : undefined) ?? 'commuter';
       const impact = calculateHouseholdImpact({
         ...ctx,
         profile,
@@ -259,7 +333,7 @@ export function createApp(deps = {}) {
   });
 
   if (env.VERCEL !== '1') {
-    app.use(express.static(publicDir, { index: 'index.html' }));
+    app.use(express.static(publicDir, { index: 'index.html', maxAge: '1h', etag: true }));
   }
 
   applyErrorMiddleware(app, secrets);

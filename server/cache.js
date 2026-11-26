@@ -190,3 +190,118 @@ export function createSlidingRateLimiter(options = {}) {
     }
   };
 }
+
+/**
+ * Validate Upstash REST base URL (HTTPS required, or localhost/127.0.0.1 for local tests).
+ * @param {string} rawUrl
+ * @returns {string | null}
+ */
+function normalizeRedisBaseUrl(rawUrl) {
+  const trimmed = String(rawUrl ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const isLocal = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+    if (parsed.protocol !== 'https:' && !isLocal) {
+      return null;
+    }
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Execute an Upstash Redis REST pipeline (INCR + PEXPIRE) for a fixed-window bucket key.
+ * @param {{
+ *   baseUrl: string,
+ *   token: string,
+ *   bucketKey: string,
+ *   windowMs: number,
+ *   fetchImpl: typeof globalThis.fetch
+ * }} cfg
+ * @returns {Promise<number>}
+ */
+async function incrementUpstashBucket(cfg) {
+  const res = await cfg.fetchImpl(`${cfg.baseUrl}/pipeline`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify([
+      ['INCR', cfg.bucketKey],
+      ['PEXPIRE', cfg.bucketKey, cfg.windowMs]
+    ]),
+    signal: AbortSignal.timeout(1500)
+  });
+  if (!res.ok) {
+    throw new Error(`Upstash REST returned ${res.status}`);
+  }
+  const payload = await res.json();
+  const count = Number(payload?.[0]?.result);
+  if (!Array.isArray(payload) || payload[0]?.error || !Number.isFinite(count) || count < 1) {
+    throw new Error('Invalid Upstash REST pipeline response');
+  }
+  return count;
+}
+
+/**
+ * Create an optional Upstash Redis REST distributed rate limiter (`INCR` + `PEXPIRE`)
+ * with automatic graceful fallback to an in-memory sliding-window rate limiter.
+ * @param {{
+ *   redisUrl?: string,
+ *   redisToken?: string,
+ *   windowMs?: number,
+ *   maxRequests?: number,
+ *   fallbackLimiter?: ReturnType<typeof createSlidingRateLimiter>,
+ *   fetchImpl?: typeof globalThis.fetch,
+ *   now?: () => number
+ * }} [options]
+ */
+export function createDistributedRateLimiter(options = {}) {
+  const windowMs = resolvePositiveInt(options.windowMs, 60_000);
+  const maxRequests = resolvePositiveInt(options.maxRequests, 60);
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const fallbackLimiter =
+    options.fallbackLimiter ?? createSlidingRateLimiter({ windowMs, maxRequests, now });
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const baseUrl = normalizeRedisBaseUrl(options.redisUrl);
+  const token = String(options.redisToken ?? '').trim();
+  const configured = Boolean(baseUrl && token && typeof fetchImpl === 'function');
+
+  async function consume(rawKey) {
+    const key = String(rawKey || 'anonymous');
+    if (!configured) {
+      return fallbackLimiter.consume(key);
+    }
+    const currentMs = now();
+    const windowIndex = Math.floor(currentMs / windowMs);
+    const resetAt = (windowIndex + 1) * windowMs;
+    const bucketKey = `rl:${key}:${windowIndex}`;
+
+    try {
+      const count = await incrementUpstashBucket({ baseUrl, token, bucketKey, windowMs, fetchImpl });
+      const allowed = count <= maxRequests;
+      return {
+        allowed,
+        remaining: Math.max(0, maxRequests - count),
+        limit: maxRequests,
+        retryAfterSec: allowed ? 0 : Math.max(1, Math.ceil((resetAt - currentMs) / 1000)),
+        resetAt
+      };
+    } catch {
+      return fallbackLimiter.consume(key);
+    }
+  }
+
+  return {
+    consume,
+    clear: () => fallbackLimiter.clear(),
+    get size() {
+      return fallbackLimiter.size;
+    }
+  };
+}

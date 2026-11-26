@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTtlCache, createSlidingRateLimiter } from '../server/cache.js';
+import { createTtlCache, createSlidingRateLimiter, createDistributedRateLimiter } from '../server/cache.js';
 import { ALLOWED_HOSTS, redactSecrets, safeFetch } from '../server/httpClient.js';
 import { createAirQualityService } from '../server/airQualityService.js';
-import { createGeminiService } from '../server/geminiService.js';
+import { clauseViolatesSafety, createGeminiService } from '../server/geminiService.js';
 import { buildAirQualitySnapshot } from '../lib/aqi.js';
 import { calculateHouseholdImpact } from '../lib/impact.js';
 import { generateDeterministicPlan } from '../lib/recommender.js';
@@ -97,6 +97,59 @@ describe('server/cache.js — Bounded LRU/TTL Cache & Sliding Rate Limiter', () 
     clock += 60_001;
     const afterWindow = limiter.consume('1.1.1.1');
     assert.equal(afterWindow.allowed, true);
+  });
+
+  it('supports mocked Upstash REST pipeline (INCR + PEXPIRE) and falls back cleanly when unconfigured or unreachable', async () => {
+    const clock = 120_000;
+    let redisCount = 0;
+    const seenRequests = [];
+
+    const upstashLimiter = createDistributedRateLimiter({
+      redisUrl: 'https://mock-upstash.example/',
+      redisToken: 'upstash-token-secret',
+      windowMs: 60_000,
+      maxRequests: 2,
+      now: () => clock,
+      fetchImpl: async (url, opts) => {
+        redisCount += 1;
+        seenRequests.push({ url, opts, body: JSON.parse(opts.body) });
+        return new Response(JSON.stringify([{ result: redisCount }, { result: 1 }]), { status: 200 });
+      }
+    });
+
+    const u1 = await upstashLimiter.consume('aqi:1.2.3.4');
+    const u2 = await upstashLimiter.consume('aqi:1.2.3.4');
+    const u3 = await upstashLimiter.consume('aqi:1.2.3.4');
+    assert.equal(u1.allowed, true);
+    assert.equal(u1.remaining, 1);
+    assert.equal(u2.allowed, true);
+    assert.equal(u2.remaining, 0);
+    assert.equal(u3.allowed, false);
+    assert.equal(u3.retryAfterSec, 60);
+    assert.equal(seenRequests[0].url, 'https://mock-upstash.example/pipeline');
+    assert.equal(seenRequests[0].opts.headers.Authorization, 'Bearer upstash-token-secret');
+    assert.equal(seenRequests[0].body[0][0], 'INCR');
+    assert.equal(seenRequests[0].body[1][0], 'PEXPIRE');
+    assert.equal(seenRequests[0].body[1][2], 60_000);
+
+    // Unconfigured falls back to sliding limiter
+    const unconfigured = createDistributedRateLimiter({ windowMs: 60_000, maxRequests: 1, now: () => clock });
+    assert.equal((await unconfigured.consume('ip1')).allowed, true);
+    assert.equal((await unconfigured.consume('ip1')).allowed, false);
+
+    // Unreachable Upstash falls back gracefully to sliding limiter
+    const unreachable = createDistributedRateLimiter({
+      redisUrl: 'https://mock-upstash.example',
+      redisToken: 'tok',
+      windowMs: 60_000,
+      maxRequests: 1,
+      now: () => clock,
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      }
+    });
+    assert.equal((await unreachable.consume('ip2')).allowed, true);
+    assert.equal((await unreachable.consume('ip2')).allowed, false);
   });
 });
 
@@ -401,6 +454,117 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
     assert.equal(res.sourceTier, 'live-open-meteo');
     assert.ok(elapsed < 3500);
   });
+
+  it('fetches past_days=1 for yesterday delta & tomorrowWindow, throws 404 CITY_NOT_FOUND, splits cpcbCityKey, fixes missing-coord CPCB scoring, and validates WAQI https URLs', async () => {
+    // 72h Open-Meteo payload: 2026-11-24 (yesterday, peak 320), 2026-11-25 (today, peak 180), 2026-11-26 (tomorrow)
+    const times72h = Array.from({ length: 72 }, (_, i) => {
+      const day = 24 + Math.floor(i / 24);
+      const hour = String(i % 24).padStart(2, '0');
+      return `2026-11-${day}T${hour}:00`;
+    });
+    const aq72 = {
+      hourly: {
+        time: times72h,
+        pm2_5: times72h.map((_, i) => (i < 24 ? (i === 20 ? 320 : 210) : i % 24 >= 12 && i % 24 <= 15 ? 65 : 180)),
+        pm10: times72h.map(() => 220),
+        carbon_monoxide: times72h.map(() => 750),
+        nitrogen_dioxide: times72h.map(() => 50),
+        sulphur_dioxide: times72h.map(() => 16),
+        ozone: times72h.map(() => 30)
+      }
+    };
+    const wx72 = {
+      hourly: {
+        time: times72h,
+        boundary_layer_height: times72h.map((_, i) => (i % 24 >= 12 && i % 24 <= 15 ? 1150 : 260)),
+        wind_speed_10m: times72h.map((_, i) => (i % 24 >= 12 && i % 24 <= 15 ? 10.8 : 3.6)),
+        relative_humidity_2m: times72h.map(() => 74)
+      }
+    };
+
+    const requestedUrls = [];
+    const clock = new Date('2026-11-25T10:00:00+05:30').getTime();
+    const svc = createAirQualityService({
+      now: () => clock,
+      env: { WAQI_API_KEY: 'waqi-k', DATA_GOV_IN_API_KEY: 'cpcb-k' },
+      fetchImpl: async (url) => {
+        requestedUrls.push(url);
+        if (url.startsWith('https://geocoding-api.open-meteo.com')) {
+          if (url.includes('XyzzyUnknown')) {
+            return new Response(JSON.stringify({ results: [] }));
+          }
+          return new Response(
+            JSON.stringify({
+              results: [{ name: 'Delhi', admin1: 'Delhi', country_code: 'IN', latitude: 28.6139, longitude: 77.209 }]
+            })
+          );
+        }
+        if (url.startsWith('https://air-quality-api.open-meteo.com')) {
+          return new Response(JSON.stringify(aq72));
+        }
+        if (url.startsWith('https://api.open-meteo.com')) {
+          return new Response(JSON.stringify(wx72));
+        }
+        if (url.startsWith('https://api.waqi.info')) {
+          return new Response(
+            JSON.stringify({
+              status: 'ok',
+              data: {
+                iaqi: { pm25: { v: 150 } },
+                city: { name: 'ITO Delhi' },
+                attributions: [
+                  { name: 'Valid DPCC', url: 'https://dpcc.delhigovt.nic.in' },
+                  { name: 'XSS Attr', url: 'javascript:alert(1)' },
+                  { name: 'Http Attr', url: 'http://insecure.example/feed' }
+                ]
+              }
+            })
+          );
+        }
+        if (url.startsWith('https://api.data.gov.in')) {
+          return new Response(
+            JSON.stringify({
+              records: [
+                // Missing coordinates -> must score 0.6 so nearby real station (dist <= 0.5) wins
+                { city: 'Delhi', station: 'Unknown Coords Station', latitude: null, longitude: null, pollutant_id: 'PM2.5', avg_value: '999', unit: 'ug/m3' },
+                { city: 'Delhi', station: 'Nearby Real Station', latitude: 28.8, longitude: 77.3, pollutant_id: 'PM2.5', avg_value: '190', unit: 'ug/m3' }
+              ]
+            })
+          );
+        }
+        return new Response('{}', { status: 404 });
+      }
+    });
+
+    // Unknown city throws 404 CITY_NOT_FOUND instead of masking as Delhi
+    await assert.rejects(
+      () => svc.getAirQuality({ city: 'XyzzyUnknown' }),
+      (err) => err?.statusCode === 404 && err?.code === 'CITY_NOT_FOUND'
+    );
+
+    // Coordinate lookup first (cpcbCity=null) must NOT poison named city CPCB lookup
+    const geoRes = await svc.getAirQuality({ lat: 28.6139, lon: 77.209 });
+    assert.ok(requestedUrls.some((u) => u.includes('past_days=1') && u.includes('forecast_days=2') && u.includes('Asia%2FKolkata')));
+    assert.ok(requestedUrls.some((u) => u.includes('api.data.gov.in') && u.includes('limit=250')));
+    assert.match(geoRes.whatChangedToday.summaryEn, /vs yesterday/);
+    assert.ok(geoRes.tomorrowWindow !== null);
+    assert.ok(geoRes.tomorrowWindow.label.includes('IST'));
+
+    // Nearby real station (dist ~0.21) beat missing-coord station (score 0.6)
+    assert.equal(geoRes.regionalContext.stationName, 'Nearby Real Station');
+    assert.equal(geoRes.calibration.observedPm25, 190);
+
+    // WAQI attribution URL validation sanitized javascript: and http:// to https://waqi.info
+    const attrUrls = geoRes.attribution.map((a) => a.url);
+    assert.ok(attrUrls.includes('https://dpcc.delhigovt.nic.in/'));
+    assert.ok(attrUrls.every((u) => u.startsWith('https://')));
+    assert.ok(!attrUrls.some((u) => u.startsWith('javascript:') || u.startsWith('http://')));
+
+    // Named city lookup uses separate :delhi cache key and queries CPCB with filters[city]=Delhi
+    const cityRes = await svc.getAirQuality({ city: 'Delhi' });
+    assert.equal(cityRes.location.city, 'Delhi');
+    assert.ok(requestedUrls.some((u) => u.includes('filters%5Bcity%5D=Delhi')));
+  });
 });
 
 describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safety Floor', () => {
@@ -422,7 +586,7 @@ describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safe
         interactions: {
           create: async (params, opts) => {
             sdkCalls += 1;
-            assert.equal(params.model, 'gemini-4-hydrogen');
+            assert.equal(params.model, 'gemini-3.5-flash-lite');
             assert.equal(params.store, false);
             assert.equal(params.response_format.mime_type, 'application/json');
             assert.ok(opts.signal instanceof AbortSignal);
@@ -621,5 +785,75 @@ describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safe
       assert.equal(res.source, 'fallback', `Expected rejection for: ${phrase}`);
       assert.equal(res.fallbackReason, 'safety_or_schema_rejected');
     }
+  });
+
+  it('caches verified enhancePlan results for 10 minutes across EN/HI toggles and hardens clauseViolatesSafety', async () => {
+    const { snapshot, impact, baselinePlan } = buildTestContext();
+    let clock = 1_000_000;
+    let sdkCalls = 0;
+
+    const svc = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key' },
+      now: () => clock,
+      clientFactory: () => ({
+        interactions: {
+          create: async (params) => {
+            sdkCalls += 1;
+            const parsedInput = JSON.parse(params.input);
+            return {
+              output_text: JSON.stringify({
+                headlinePlainEnglish: `Plan (${parsedInput.lang}) NAQI ${snapshot.current.naqi}`,
+                threeAnchorRoutine: [
+                  { id: 'morning_shield', conflictNote: 'Hold commute.', actions: ['Stay indoors.'] },
+                  { id: 'midday_flush', conflictNote: 'Short flush.', actions: ['Open 15 min.'] },
+                  { id: 'evening_lockdown', conflictNote: 'Seal home.', actions: ['Run CR box.'] }
+                ],
+                profileGuidance: [{ profileId: 'commuter', priorityAction: 'Wear N95 outdoors.' }],
+                whatsappBrief: `Brief (${parsedInput.lang})`
+              })
+            };
+          }
+        }
+      })
+    });
+
+    const reqEn = {
+      snapshot,
+      impact,
+      baselinePlan,
+      validated: { lang: 'en', profiles: ['infant', 'commuter'], maskType: 'n95', purifierMode: 'diy_cr_box', communityActions: [] }
+    };
+    const reqHi = {
+      snapshot,
+      impact,
+      baselinePlan,
+      validated: { lang: 'hi', profiles: ['infant', 'commuter'], maskType: 'n95', purifierMode: 'diy_cr_box', communityActions: [] }
+    };
+
+    const en1 = await svc.enhancePlan(reqEn);
+    const hi1 = await svc.enhancePlan(reqHi);
+    const en2 = await svc.enhancePlan(reqEn);
+    assert.equal(en1.source, 'gemini');
+    assert.equal(hi1.source, 'gemini');
+    assert.equal(en2.source, 'gemini');
+    assert.equal(en2.plan.headlinePlainEnglish, en1.plan.headlinePlainEnglish);
+    assert.equal(sdkCalls, 2);
+
+    // After 10 minutes TTL expires -> fresh SDK call
+    clock += 10 * 60 * 1000 + 1;
+    const en3 = await svc.enhancePlan(reqEn);
+    assert.equal(en3.source, 'gemini');
+    assert.equal(sdkCalls, 3);
+
+    // Hardened clauseViolatesSafety checks
+    assert.equal(clauseViolatesSafety('Put an N95 on your infant and avoid cold drafts'.split(' and ')[0], 420), true);
+    assert.equal(clauseViolatesSafety('Put an N95 on your infant to avoid cold drafts', 420), true);
+    assert.equal(clauseViolatesSafety('Never put an N95 mask on your infant', 420), false);
+    assert.equal(clauseViolatesSafety('शिशु को कभी मास्क न पहनाएं', 420), false);
+    assert.equal(clauseViolatesSafety('Do light indoor exercise or yoga with purifier on', 420), false);
+    assert.equal(clauseViolatesSafety('घर के अंदर हल्का व्यायाम करें', 420), false);
+    assert.equal(clauseViolatesSafety('Go for a morning jog in the park', 420), true);
+    assert.equal(clauseViolatesSafety('Use a plasma air cleaner indoors', 200), true);
+    assert.equal(clauseViolatesSafety('Rinse your respirator with soap', 200), true);
   });
 });
