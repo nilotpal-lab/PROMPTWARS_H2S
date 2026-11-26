@@ -4,9 +4,10 @@
  * bilingual i18n toggle, .ics download, and WhatsApp brief copy.
  */
 
-import { applyStaticI18n, getStrings } from './i18n.js';
+import { applyStaticI18n, formatNumber, getStrings, syncProfileSelectOptions } from './i18n.js';
 import {
   PROFILE_PARAMS,
+  PROFILE_RISK_ORDER,
   buildPlanRequestPayload,
   computeImpactMirror,
   createInitialState,
@@ -117,9 +118,16 @@ function updateSelectedCheckboxStyles(doc) {
   }
 }
 
-function readNumField(doc, id, fallback) {
-  const val = Number(doc.getElementById(id)?.value);
-  return Number.isFinite(val) ? val : fallback;
+function readNumField(doc, id, min, max) {
+  const raw = doc.getElementById(id)?.value;
+  if (raw === undefined || String(raw).trim() === '') {
+    return undefined;
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num)) {
+    return undefined;
+  }
+  return Math.min(max, Math.max(min, num));
 }
 
 function readDomToggles(doc) {
@@ -131,41 +139,54 @@ function readDomToggles(doc) {
   };
 }
 
+function readSelectVal(doc, id, fallback) {
+  const el = doc.getElementById(id);
+  return el && el.value ? el.value : fallback;
+}
+
+function readProfileSelection(doc) {
+  const checked = Array.from(doc.querySelectorAll('input[name="profiles"]:checked')).map((el) => el.value);
+  const profiles = checked.length > 0 ? checked : ['commuter'];
+  const selectVal = readSelectVal(doc, 'profile-select', '');
+  const profile = profiles.includes(selectVal) ? selectVal : profiles[0];
+  return { profile, profiles };
+}
+
 function readHouseholdFromDom(doc, currentHousehold) {
-  const checkedProfiles = Array.from(doc.querySelectorAll('input[name="profiles"]:checked')).map((el) => el.value);
-  const profiles = checkedProfiles.length > 0 ? checkedProfiles : ['commuter'];
-  const profile = doc.getElementById('profile-select')?.value || profiles[0];
+  const { profile, profiles } = readProfileSelection(doc);
   const communityActions = Array.from(doc.querySelectorAll('input[name="communityActions"]:checked')).map((el) => el.value);
 
   return {
     ...currentHousehold,
     profile,
     profiles,
-    maskType: doc.getElementById('mask-select')?.value || 'n95',
-    purifierMode: doc.getElementById('purifier-select')?.value || 'none',
-    roomVolumeM3: readNumField(doc, 'room-volume-range', 36),
-    outdoorHours: readNumField(doc, 'outdoor-hours-range', 2.5),
-    commuteFrom: doc.getElementById('commute-from-select')?.value || 'petrol_car',
-    commuteTo: doc.getElementById('commute-to-select')?.value || 'metro_bus',
-    dailyKm: readNumField(doc, 'daily-km-input', 16),
-    commuteDaysPerWeek: readNumField(doc, 'commute-days-input', 5),
+    maskType: readSelectVal(doc, 'mask-select', 'n95'),
+    purifierMode: readSelectVal(doc, 'purifier-select', 'none'),
+    roomVolumeM3: readNumField(doc, 'room-volume-range', 10, 500) ?? 36,
+    outdoorHours: readNumField(doc, 'outdoor-hours-range', 0, 16) ?? PROFILE_PARAMS[profile].defaultOutdoorHours,
+    commuteFrom: readSelectVal(doc, 'commute-from-select', 'petrol_car'),
+    commuteTo: readSelectVal(doc, 'commute-to-select', 'metro_bus'),
+    dailyKm: readNumField(doc, 'daily-km-input', 0, 200),
+    commuteDaysPerWeek: readNumField(doc, 'commute-days-input', 1, 7),
     communityActions,
     ...readDomToggles(doc)
   };
 }
 
-function syncProfileOutdoorHours(doc, target) {
+function pickHighestRiskProfile(checked) {
+  return PROFILE_RISK_ORDER.find((id) => checked.includes(id)) || checked[0] || 'commuter';
+}
+
+function syncProfileOutdoorHours(doc, target, lang) {
   const range = doc.getElementById('outdoor-hours-range');
-  const select = doc.getElementById('profile-select');
-  if (!range || !select) {
+  if (!range) {
     return;
   }
   if (target?.name === 'profiles') {
     const checked = Array.from(doc.querySelectorAll('input[name="profiles"]:checked')).map((el) => el.value);
-    if (checked.length > 0 && !checked.includes(select.value)) {
-      select.value = checked[0];
-      range.value = String(PROFILE_PARAMS[checked[0]]?.defaultOutdoorHours ?? range.value);
-    }
+    const chosen = pickHighestRiskProfile(checked);
+    syncProfileSelectOptions(doc, checked, chosen, lang);
+    range.value = String(PROFILE_PARAMS[chosen]?.defaultOutdoorHours ?? range.value);
     return;
   }
   if (target?.id === 'profile-select' && PROFILE_PARAMS[target.value]) {
@@ -315,14 +336,16 @@ function bindUtilityActions(doc, refs, state, onLangChange) {
 
   refs['toggle-table-btn']?.addEventListener('click', () => {
     const wrap = refs['pm25-table-wrap'];
-    if (!wrap) {
+    const btn = refs['toggle-table-btn'];
+    if (!wrap || !btn) {
       return;
     }
-    const next = refs['toggle-table-btn'].getAttribute('aria-expanded') !== 'true';
+    const next = btn.getAttribute('aria-expanded') !== 'true';
     wrap.hidden = !next;
-    refs['toggle-table-btn'].setAttribute('aria-expanded', String(next));
+    btn.setAttribute('aria-expanded', String(next));
+    btn.setAttribute('data-i18n', next ? 'hideTableBtn' : 'showTableBtn');
     const dict = getStrings(state.lang);
-    refs['toggle-table-btn'].textContent = String(next ? dict.hideTableBtn : dict.showTableBtn);
+    btn.textContent = String(next ? dict.hideTableBtn : dict.showTableBtn);
   });
 
   doc.getElementById('download-ics-btn')?.addEventListener('click', () => {
@@ -332,6 +355,61 @@ function bindUtilityActions(doc, refs, state, onLangChange) {
 
   doc.getElementById('copy-whatsapp-btn')?.addEventListener('click', () => copyWhatsappBrief(refs, state.lang));
   doc.getElementById('print-sheet-btn')?.addEventListener('click', () => window.print());
+}
+
+function setCopilotLoading(refs, loading, lang) {
+  const msgBox = refs['copilot-messages'];
+  const sendBtn = refs['copilot-send-btn'];
+  const statusEl = refs['copilot-status'];
+  if (msgBox) {
+    msgBox.setAttribute('aria-busy', loading ? 'true' : 'false');
+  }
+  if (sendBtn) {
+    sendBtn.disabled = loading;
+  }
+  if (statusEl) {
+    statusEl.textContent = loading ? String(getStrings(lang).sendingStatus) : '';
+  }
+}
+
+function buildChatMeta(data, lang) {
+  if (!data?.citedMetrics) {
+    return String(data?.source || 'fallback');
+  }
+  const naqi = formatNumber(Number(data.citedMetrics.naqi), lang);
+  const srcLabel = data.source === 'gemini' ? getStrings(lang).sourceGemini : getStrings(lang).sourceFallback;
+  return `NAQI ${naqi} · ${data.citedMetrics.ventilationWindow} · ${srcLabel}`;
+}
+
+function bindSimulatorEvents(doc, handler) {
+  const form = doc.getElementById('simulator-form');
+  if (!form) {
+    return;
+  }
+  form.addEventListener('input', (event) => {
+    if (['range', 'number', 'text'].includes(event.target?.type)) {
+      handler(event);
+    }
+  });
+  form.addEventListener('change', (event) => {
+    if (event.target?.type === 'checkbox' || event.target?.tagName === 'SELECT') {
+      handler(event);
+    }
+  });
+}
+
+function clearTransientNotices(refs, state) {
+  if (refs['copy-status']) {
+    refs['copy-status'].textContent = '';
+  }
+  if (refs['copilot-status']) {
+    refs['copilot-status'].textContent = '';
+  }
+  if (refs['status-banner'] && state.snapshot?.stale) {
+    refs['status-banner'].textContent = String(getStrings(state.lang).staleNotice);
+  } else if (refs['status-banner']) {
+    refs['status-banner'].textContent = '';
+  }
 }
 
 /**
@@ -358,6 +436,7 @@ export function initApp(doc = document) {
 
   const renderEverything = () => {
     applyStaticI18n(doc, state.lang);
+    syncProfileSelectOptions(doc, state.household.profiles, state.household.profile, state.lang);
     syncPressedButtons(doc, '.lang-btn', 'data-lang', state.lang);
     syncPressedButtons(doc, '[data-preset]', 'data-preset', state.query.city ? '' : state.query.preset);
     updateSelectedCheckboxStyles(doc);
@@ -379,13 +458,17 @@ export function initApp(doc = document) {
       renderEverything();
     } catch (err) {
       if (!isAbortError(err)) {
+        state.plan = null;
         state.planSource = 'fallback';
+        renderEverything();
       }
     }
   };
 
   const refreshAqiAndPlan = async () => {
     const dict = getStrings(state.lang);
+    state.plan = null;
+    state.planSource = 'fallback';
     setStatus(String(dict.loadingStatus));
     try {
       const snap = await fetchAqiSnapshot({ ...state.query, lang: state.lang });
@@ -399,6 +482,7 @@ export function initApp(doc = document) {
     } catch (err) {
       if (!isAbortError(err)) {
         setStatus(`${dict.errorPrefix}${err.message}`);
+        renderEverything();
       }
     }
   };
@@ -408,24 +492,33 @@ export function initApp(doc = document) {
     if (!trimmed) {
       return;
     }
-    state.chatHistory.push({ role: 'user', text: trimmed });
-    renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
+    const historySlice = state.chatHistory.slice(-6).map((m) => ({ role: m.role, text: m.text }));
+    const pendingList = [...state.chatHistory, { role: 'user', text: trimmed }];
+    setCopilotLoading(refs, true, state.lang);
+    renderCopilotPanel(refs, pendingList, state.snapshot, state.lang, sendChatPrompt);
 
-    const historySlice = state.chatHistory.slice(-7, -1).map((m) => ({ role: m.role, text: m.text }));
     try {
       const data = await postChatMessage({ message: trimmed, history: historySlice, lang: state.lang, context: buildPlanRequestPayload(state) });
-      const meta = data.citedMetrics ? `NAQI ${data.citedMetrics.naqi} · ${data.citedMetrics.ventilationWindow} · ${data.source}` : String(data.source || 'fallback');
-      state.chatHistory.push({ role: 'assistant', text: data.reply, meta });
+      state.chatHistory.push({ role: 'user', text: trimmed });
+      state.chatHistory.push({
+        role: 'assistant',
+        text: data.reply,
+        meta: buildChatMeta(data, state.lang),
+        safetyNotice: data.safetyNotice
+      });
+      setCopilotLoading(refs, false, state.lang);
+      renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
     } catch (err) {
-      if (!isAbortError(err)) {
-        state.chatHistory.push({ role: 'assistant', text: `${getStrings(state.lang).errorPrefix}${err.message}` });
+      setCopilotLoading(refs, false, state.lang);
+      if (!isAbortError(err) && refs['copilot-status']) {
+        refs['copilot-status'].textContent = `${getStrings(state.lang).errorPrefix}${err.message}`;
       }
+      renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
     }
-    renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
   }
 
-  const onSimulatorInput = (event) => {
-    syncProfileOutdoorHours(doc, event.target);
+  const onSimulatorChange = (event) => {
+    syncProfileOutdoorHours(doc, event.target, state.lang);
     state.household = readHouseholdFromDom(doc, state.household);
     state.impact = computeImpactMirror(state.snapshot.current?.pm25 ?? 180, state.household);
     updateSelectedCheckboxStyles(doc);
@@ -436,7 +529,9 @@ export function initApp(doc = document) {
     liveAnnounceTimer = window.setTimeout(() => {
       if (refs['simulator-live']) {
         const d = state.impact.dose;
-        refs['simulator-live'].textContent = `${d.totalMitigatedUg} µg/day (${d.percentReduced}% reduced)`;
+        refs['simulator-live'].textContent = state.lang === 'hi'
+          ? `दैनिक भार ${formatNumber(d.totalMitigatedUg, 'hi')} µg/दिन (${formatNumber(d.percentReduced, 'hi')}% कमी)`
+          : `Updated dose ${formatNumber(d.totalMitigatedUg, 'en')} µg/day (${formatNumber(d.percentReduced, 'en')}% reduction)`;
       }
     }, 350);
 
@@ -447,19 +542,23 @@ export function initApp(doc = document) {
   bindTabs(doc, (tabId) => {
     state.activeTab = tabId;
   });
-  doc.getElementById('simulator-form')?.addEventListener('input', onSimulatorInput);
-  doc.getElementById('simulator-form')?.addEventListener('change', onSimulatorInput);
+  bindSimulatorEvents(doc, onSimulatorChange);
   bindLocationHandlers(doc, refs, state, refreshAqiAndPlan);
   bindCopilotDialog(doc, refs, sendChatPrompt);
   bindUtilityActions(doc, refs, state, (nextLang) => {
     state.lang = nextLang;
     saveLang(nextLang);
+    clearTransientNotices(refs, state);
     renderEverything();
     syncServerPlan();
   });
 
   renderEverything();
-  return { state, refreshAll: refreshAqiAndPlan };
+  const destroy = () => {
+    window.clearTimeout(planDebounceTimer);
+    window.clearTimeout(liveAnnounceTimer);
+  };
+  return { state, refreshAll: refreshAqiAndPlan, destroy };
 }
 
 if (typeof window !== 'undefined' && !window.__VAYUMITRA_MANUAL_INIT__) {

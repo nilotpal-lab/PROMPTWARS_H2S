@@ -53,7 +53,7 @@ html {
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
-  scroll-padding-top: 84px;
+  scroll-padding-top: 88px;
   background: var(--bg-canvas);
   color: var(--text-primary);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Devanagari", "Kohinoor Devanagari", sans-serif;
@@ -99,6 +99,10 @@ body {
   min-height: 44px;
   display: inline-flex;
   align-items: center;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 120ms var(--ease-out);
 }
 
 .skip-link:focus {
@@ -118,7 +122,7 @@ body {
   width: 100%;
   max-width: 1200px;
   margin-inline: auto;
-  padding-inline: 20px;
+  padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px));
 }
 
 .site-header {
@@ -259,7 +263,10 @@ body {
 
 button:active,
 .chip-check:active,
-.toggle-row:active {
+.toggle-row:active,
+.anchor-check-label:active,
+.math-disclosure summary:active,
+.skip-link:active {
   transform: scale(0.97);
 }
 
@@ -437,6 +444,12 @@ input[type="range"] {
   background: var(--sev-vpoor-bg);
   border-color: var(--sev-vpoor-border);
   color: var(--sev-vpoor-text);
+}
+
+.alert-critical {
+  background: var(--sev-sev-bg);
+  border-color: var(--sev-sev-border);
+  color: var(--sev-sev-text);
 }
 
 .alert-title {
@@ -950,6 +963,10 @@ input[type="range"] {
   min-height: 44px;
   cursor: pointer;
   font-weight: 600;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 120ms var(--ease-out);
 }
 
 .anchor-check-label input {
@@ -1040,6 +1057,10 @@ input[type="range"] {
   align-items: center;
   font-weight: 600;
   cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 120ms var(--ease-out);
 }
 
 .math-body {
@@ -1074,7 +1095,7 @@ input[type="range"] {
 .copilot-dialog {
   margin: auto;
   padding: 0;
-  width: min(560px, calc(100vw - 24px));
+  width: min(560px, calc(100% - 24px));
   max-height: min(86dvh, 720px);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-lg);
@@ -1164,10 +1185,27 @@ input[type="range"] {
   color: var(--text-primary);
 }
 
+.chat-safety-notice {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--sev-vpoor-bg);
+  border: 1px solid var(--sev-vpoor-border);
+  color: var(--sev-vpoor-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
 .chat-meta {
   margin: 6px 0 0;
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.copilot-status {
+  margin: 0;
+  padding: 4px 16px;
+  min-height: 0;
 }
 
 .copilot-form {
@@ -1197,8 +1235,16 @@ input[type="range"] {
 }
 
 @media (max-width: 640px) {
+  html {
+    scroll-padding-top: 20px;
+  }
+
+  .site-header {
+    position: static;
+  }
+
   .container {
-    padding-inline: 14px;
+    padding-inline: max(14px, env(safe-area-inset-left, 0px)) max(14px, env(safe-area-inset-right, 0px));
   }
 
   .card {
@@ -1221,13 +1267,17 @@ input[type="range"] {
   }
 
   .copilot-dialog {
-    width: 100vw;
-    max-width: 100vw;
+    width: 100%;
+    max-width: 100%;
     height: 100dvh;
     max-height: 100dvh;
     margin: 0;
     border-radius: 0;
     border: 0;
+  }
+
+  .copilot-header {
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
   }
 
   .copilot-shell {
@@ -1237,8 +1287,17 @@ input[type="range"] {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    transition-duration: 0.01ms;
-    animation-duration: 0.01ms;
+    transition: none !important;
+    animation: none !important;
+  }
+
+  button:active,
+  .chip-check:active,
+  .toggle-row:active,
+  .anchor-check-label:active,
+  .math-disclosure summary:active,
+  .skip-link:active {
+    transform: none !important;
   }
 }
 
