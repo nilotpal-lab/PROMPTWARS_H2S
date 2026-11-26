@@ -68,6 +68,7 @@
               data-i18n-placeholder="cityPlaceholder"
             >
             <button type="submit" class="btn btn-primary" id="city-submit-btn" data-i18n="checkAirBtn">Check Air</button>
+            <button type="button" class="btn btn-secondary" id="gps-locate-btn" data-i18n="useMyLocationBtn">Use My Location</button>
           </div>
           <datalist id="indian-cities-list">
             <option value="Delhi"></option>
@@ -185,7 +186,7 @@
           <p class="attribution-line" id="data-attribution"></p>
         </article>
 
-        <article class="card kpi-card" aria-labelledby="vent-card-heading">
+        <article class="card kpi-card" id="vent-card" aria-labelledby="vent-card-heading">
           <div class="kpi-top">
             <h3 id="vent-card-heading" class="card-heading" data-i18n="ventCardHeading">Best Daytime Ventilation Window</h3>
             <span id="vent-confidence-badge" class="status-pill">—</span>
@@ -195,6 +196,10 @@
           <div class="peak-smog-row">
             <span class="meta-label" data-i18n="peakSmogLabel">Peak smog hours</span>
             <strong class="tabular-nums" id="peak-window-label">—</strong>
+          </div>
+          <div class="tomorrow-window-row" id="tomorrow-window-row" hidden>
+            <span class="meta-label" data-i18n="tomorrowVentLabel">Tomorrow's airing slot</span>
+            <strong class="tabular-nums" id="tomorrow-window-label">—</strong>
           </div>
         </article>
 
@@ -232,7 +237,7 @@
           </div>
 
           <div class="svg-frame">
-            <svg id="pm25-chart-svg" class="pm25-chart-svg" viewBox="0 0 720 314" role="img" aria-labelledby="pm25-chart-title pm25-chart-desc">
+            <svg id="pm25-chart-svg" class="pm25-chart-svg" viewBox="0 0 560 290" role="img" aria-labelledby="pm25-chart-title pm25-chart-desc">
               <title id="pm25-chart-title">24-hour PM2.5 forecast curve</title>
               <desc id="pm25-chart-desc">Hourly particulate concentration chart highlighting the daytime ventilation window and peak smog hours.</desc>
             </svg>
@@ -266,6 +271,11 @@
             alt="Cross-section comparison showing daytime solar heating lifting air above 1,200 meters for safe 20-minute cross-ventilation versus a winter night cold lid below 400 meters trapping vehicle, cooking, and burning PM2.5."
           >
           <figcaption class="diagram-caption" data-i18n="inversionDiagramCaption">Why VayuMitra never tells families to open windows at 3 AM: cold nights trap smoke below 400 m until midday warmth lifts dispersion</figcaption>
+          <ul class="diagram-callouts bullet-list" id="inversion-diagram-callouts">
+            <li data-i18n="invCallout1">Daytime (&gt;1,200 m mixing layer): Solar warming lifts smog upward — safe 20-min cross-ventilation window.</li>
+            <li data-i18n="invCallout2">Night thermal lid (&lt;400 m inversion): Cold air traps vehicle, cooking, and burning PM2.5 at street level — keep windows shut.</li>
+            <li data-i18n="invCallout3">Clearing Speed (VC = PBL × Wind): Values under 1,500 m²/s indicate trapped smoke and rapid buildup.</li>
+          </ul>
         </figure>
       </div>
     </section>
@@ -347,7 +357,7 @@
                 <span data-i18n="roomVolumeLabel">Bedroom / room size</span>:
                 <strong class="tabular-nums" id="room-volume-display">36 m³ (~11×12 ft room)</strong>
               </label>
-              <input id="room-volume-range" name="roomVolumeM3" type="range" min="10" max="500" step="2" value="36">
+              <input id="room-volume-range" name="roomVolumeM3" type="range" min="10" max="500" step="2" value="36" aria-valuetext="36 m³ (~11×12 ft room)">
               <p class="gate-line" id="cadr-gate-badge"></p>
             </div>
           </div>
@@ -357,7 +367,7 @@
               <span data-i18n="outdoorHoursLabel">Daily outdoor / transit hours</span>:
               <strong class="tabular-nums" id="outdoor-hours-display">2.5 h</strong>
             </label>
-            <input id="outdoor-hours-range" name="outdoorHours" type="range" min="0" max="16" step="0.5" value="2.5">
+            <input id="outdoor-hours-range" name="outdoorHours" type="range" min="0" max="16" step="0.5" value="2.5" aria-valuetext="2.5 hours per day">
           </div>
 
           <fieldset class="sim-fieldset">
@@ -399,10 +409,12 @@
               <div class="field-block">
                 <label for="daily-km-input" class="field-label" data-i18n="dailyKmLabel">Round-trip km/day</label>
                 <input id="daily-km-input" name="dailyKm" type="number" inputmode="numeric" min="0" max="200" step="1" value="16">
+                <p id="daily-km-error" class="field-error" role="alert" hidden></p>
               </div>
               <div class="field-block">
                 <label for="commute-days-input" class="field-label" data-i18n="commuteDaysLabel">Days/week</label>
                 <input id="commute-days-input" name="commuteDaysPerWeek" type="number" inputmode="numeric" min="1" max="7" step="1" value="5">
+                <p id="commute-days-error" class="field-error" role="alert" hidden></p>
               </div>
             </div>
           </fieldset>
@@ -467,6 +479,11 @@
               alt="Diagram of a 230V/50Hz 4-filter MERV-13 Corsi-Rosenthal cube showing air drawn through all four sides to avoid motor overheating, optional activated carbon pre-wrap for cooking fumes, and sealed base seams."
             >
             <figcaption class="diagram-caption" data-i18n="diyDiagramCaption">230V/50Hz safety rule: pair 4 pleated MERV-13 filters in a sealed cube so low air resistance keeps Indian box fan motors cool</figcaption>
+            <ul class="diagram-callouts bullet-list" id="diy-diagram-callouts">
+              <li data-i18n="diyCallout1">4 pleated MERV-13 filter walls: Draw room air from all 4 sides (~320 m³/h CADR) so 230V/50Hz box fan motors never overheat.</li>
+              <li data-i18n="diyCallout2">Sealed cardboard shroud &amp; tape seams: Block bypass leaks around fan corners so air passes through the filter media.</li>
+              <li data-i18n="diyCallout3">Optional activated carbon pre-wrap: Traps kitchen tadka fumes &amp; NO₂; never tape a single filter directly onto a 230V fan.</li>
+            </ul>
           </figure>
 
           <h3 class="subsection-title" data-i18n="mythBustersHeading">Smog Myth-Busters</h3>
@@ -519,7 +536,7 @@
           <p class="muted-caption" id="dose-summary-line"></p>
 
           <div class="svg-frame">
-            <svg id="dose-bar-svg" class="dose-bar-svg" viewBox="0 0 640 156" role="img" aria-labelledby="dose-bar-title dose-bar-desc">
+            <svg id="dose-bar-svg" class="dose-bar-svg" viewBox="0 0 520 168" role="img" aria-labelledby="dose-bar-title dose-bar-desc">
               <title id="dose-bar-title">3-slice daily inhaled PM2.5 dose breakdown</title>
               <desc id="dose-bar-desc">Segmented bar comparing commute and outdoor exposure, cooking and indoor sources, and baseline indoor infiltration.</desc>
             </svg>

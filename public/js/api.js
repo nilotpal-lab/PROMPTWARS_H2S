@@ -30,6 +30,7 @@ async function parseJsonResponse(res) {
     const msg = data?.error?.message || `Request failed (${res.status})`;
     const err = new Error(msg);
     err.status = res.status;
+    err.code = data?.error?.code || null;
     throw err;
   }
   if (!data || typeof data !== 'object') {
@@ -52,6 +53,9 @@ export async function fetchAqiSnapshot(query) {
   const params = new URLSearchParams();
   if (query.city) {
     params.set('city', String(query.city));
+  } else if (Number.isFinite(query.lat) && Number.isFinite(query.lon)) {
+    params.set('lat', String(query.lat));
+    params.set('lon', String(query.lon));
   } else if (query.preset) {
     params.set('preset', String(query.preset));
   }

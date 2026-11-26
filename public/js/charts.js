@@ -6,7 +6,7 @@
 import { formatNumber } from './i18n.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const PLOT = Object.freeze({ left: 56, right: 696, top: 42, bottom: 266, width: 640, height: 224 });
+const PLOT = Object.freeze({ left: 52, right: 540, top: 54, bottom: 252, width: 488, height: 198 });
 
 function svgEl(tag, attrs = {}, text = null) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -65,14 +65,14 @@ function collectWindowRuns(hourly, startHour, endHour) {
   return runs;
 }
 
-function drawBandRun(svg, run, totalHours, colorHex, patternId, labelText, yLabel) {
+function drawBandRect(svg, run, totalHours, colorHex, patternId) {
   const denom = Math.max(totalHours - 1, 1);
   const [startIdx, endIdx] = run;
   const xStart = PLOT.left + (startIdx / denom) * PLOT.width;
   const rawEndX = endIdx + 1 < totalHours
     ? PLOT.left + ((endIdx + 1) / denom) * PLOT.width
     : PLOT.right;
-  const rectW = Math.min(PLOT.right - xStart, Math.max(22, rawEndX - xStart));
+  const rectW = Math.min(PLOT.right - xStart, Math.max(20, rawEndX - xStart));
   const clampedX = Math.max(PLOT.left, Math.min(PLOT.right - rectW, xStart));
 
   svg.append(svgEl('rect', {
@@ -84,31 +84,48 @@ function drawBandRun(svg, run, totalHours, colorHex, patternId, labelText, yLabe
     stroke: colorHex,
     'stroke-width': 1
   }));
-
-  if (labelText) {
-    const labelX = Math.min(PLOT.right - 56, Math.max(PLOT.left + 56, clampedX + rectW / 2));
-    svg.append(svgEl('text', {
-      x: labelX.toFixed(1),
-      y: yLabel,
-      'text-anchor': 'middle',
-      fill: colorHex,
-      'font-size': 12.5,
-      'font-weight': 600
-    }, labelText));
-  }
+  return Math.min(PLOT.right - 64, Math.max(PLOT.left + 64, clampedX + rectW / 2));
 }
 
-function drawWindowBand(svg, win, hourly, colorHex, patternId, yLabel) {
+function drawWindowBand(svg, win, hourly, colorHex, patternId) {
   if (!win) {
-    return;
+    return null;
   }
   const start = Number.isFinite(Number(win.startHour)) ? ((Math.trunc(Number(win.startHour)) % 24) + 24) % 24 : 13;
   const end = Number.isFinite(Number(win.endHour)) ? ((Math.trunc(Number(win.endHour)) % 24) + 24) % 24 : (start + 2) % 24;
   const runs = collectWindowRuns(hourly, start, end);
-  const labelText = win.label ? String(win.label) : '';
+  let labelX = null;
 
   for (const [idx, run] of runs.entries()) {
-    drawBandRun(svg, run, hourly.length, colorHex, patternId, idx === 0 ? labelText : '', yLabel);
+    const center = drawBandRect(svg, run, hourly.length, colorHex, patternId);
+    if (idx === 0) {
+      labelX = center;
+    }
+  }
+  return labelX !== null && win.label ? { x: labelX, text: String(win.label), color: colorHex } : null;
+}
+
+function drawHeaderBandLabels(svg, ventLabel, peakLabel) {
+  const placed = [ventLabel, peakLabel].filter(Boolean);
+  if (placed.length === 2 && Math.abs(placed[0].x - placed[1].x) < 136) {
+    if (placed[0].x <= placed[1].x) {
+      placed[0].x = Math.max(PLOT.left + 64, placed[0].x - 36);
+      placed[1].x = Math.min(PLOT.right - 64, placed[1].x + 36);
+    } else {
+      placed[1].x = Math.max(PLOT.left + 64, placed[1].x - 36);
+      placed[0].x = Math.min(PLOT.right - 64, placed[0].x + 36);
+    }
+  }
+  for (const [idx, item] of placed.entries()) {
+    const yPos = idx === 1 && placed.length === 2 && Math.abs(placed[0].x - placed[1].x) < 136 ? 35 : 46;
+    svg.append(svgEl('text', {
+      x: item.x.toFixed(1),
+      y: yPos,
+      'text-anchor': 'middle',
+      fill: item.color,
+      'font-size': 14,
+      'font-weight': 600
+    }, item.text));
   }
 }
 
@@ -129,7 +146,7 @@ function drawGridAndAxes(svg, maxY, hourly) {
   for (const val of [0, Math.round(maxY / 2), maxY]) {
     const y = PLOT.bottom - (val / maxY) * PLOT.height;
     svg.append(svgEl('line', { x1: PLOT.left, y1: y.toFixed(1), x2: PLOT.right, y2: y.toFixed(1), stroke: '#CBD2D9', 'stroke-width': 1 }));
-    svg.append(svgEl('text', { x: PLOT.left - 8, y: (y + 4).toFixed(1), 'text-anchor': 'end', fill: '#4A5565', 'font-size': 13 }, val));
+    svg.append(svgEl('text', { x: PLOT.left - 8, y: (y + 5).toFixed(1), 'text-anchor': 'end', fill: '#4A5565', 'font-size': 14 }, val));
   }
 
   const thresholdY = PLOT.bottom - (Math.min(90, maxY) / maxY) * PLOT.height;
@@ -142,25 +159,26 @@ function drawGridAndAxes(svg, maxY, hourly) {
     'stroke-width': 1.5,
     'stroke-dasharray': '5 4'
   }));
-  svg.append(svgEl('text', { x: PLOT.right - 4, y: (thresholdY - 6).toFixed(1), 'text-anchor': 'end', fill: '#593900', 'font-size': 12.5, 'font-weight': 600 }, '90 µg/m³'));
+  const thresholdLabelY = thresholdY - 7 >= PLOT.top + 14 ? thresholdY - 7 : thresholdY + 16;
+  svg.append(svgEl('text', { x: PLOT.right - 4, y: thresholdLabelY.toFixed(1), 'text-anchor': 'end', fill: '#593900', 'font-size': 14, 'font-weight': 600 }, '90 µg/m³'));
 
   const denom = Math.max(hourly.length - 1, 1);
   for (const idx of collectAxisTickIndices(hourly)) {
     const hr = resolveHourAt(hourly[idx], idx);
-    const x = Math.min(PLOT.right - 14, Math.max(PLOT.left + 14, PLOT.left + (idx / denom) * PLOT.width));
-    svg.append(svgEl('text', { x: x.toFixed(1), y: 292, 'text-anchor': 'middle', fill: '#4A5565', 'font-size': 13 }, `${String(hr).padStart(2, '0')}:00`));
+    const x = Math.min(PLOT.right - 18, Math.max(PLOT.left + 18, PLOT.left + (idx / denom) * PLOT.width));
+    svg.append(svgEl('text', { x: x.toFixed(1), y: 277, 'text-anchor': 'middle', fill: '#4A5565', 'font-size': 14 }, `${String(hr).padStart(2, '0')}:00`));
   }
 }
 
 function drawLegend(svg, isHi) {
   const items = [
-    { x: 56, fill: '#0B57D0', stroke: '#0B57D0', label: 'PM2.5 (µg/m³)' },
-    { x: 196, fill: 'url(#vent-hatch)', stroke: '#1E7E45', label: isHi ? 'दोपहर वेंटिलेशन समय' : 'Daytime flush window' },
-    { x: 400, fill: 'url(#peak-hatch)', stroke: '#B91C1C', label: isHi ? 'चरम धुंध घंटे' : 'Peak smog hours' }
+    { x: 52, fill: '#0B57D0', stroke: '#0B57D0', label: 'PM2.5 (µg/m³)' },
+    { x: 196, fill: 'url(#vent-hatch)', stroke: '#1E7E45', label: isHi ? 'दोपहर हवा' : 'Daytime flush' },
+    { x: 356, fill: 'url(#peak-hatch)', stroke: '#B91C1C', label: isHi ? 'चरम धुंध' : 'Peak smog' }
   ];
   for (const item of items) {
     svg.append(svgEl('rect', { x: item.x, y: 10, width: 14, height: 14, rx: 3, fill: item.fill, stroke: item.stroke, 'stroke-width': 1 }));
-    svg.append(svgEl('text', { x: item.x + 20, y: 22, fill: '#364152', 'font-size': 13, 'font-weight': 500 }, item.label));
+    svg.append(svgEl('text', { x: item.x + 20, y: 22, fill: '#364152', 'font-size': 14, 'font-weight': 500 }, item.label));
   }
 }
 
@@ -198,7 +216,7 @@ function buildChartTitleDesc(snapshot, values, isHi) {
 }
 
 /**
- * Render non-interactive role="img" 24h PM2.5 curve SVG with hatch bands & window callouts.
+ * Render non-interactive role="img" 24h PM2.5 curve SVG with hatch bands & header callouts.
  * @param {SVGElement} svg
  * @param {Record<string, unknown>} snapshot
  * @param {'en' | 'hi'} lang
@@ -214,11 +232,12 @@ export function renderPm25Chart(svg, snapshot, lang) {
   const maxY = Math.ceil(Math.max(...values, 120) / 50) * 50;
   const [titleNode, descNode] = buildChartTitleDesc(snapshot, values, isHi);
 
-  svg.setAttribute('viewBox', '0 0 720 314');
+  svg.setAttribute('viewBox', '0 0 560 290');
   svg.replaceChildren(titleNode, descNode, buildChartDefs());
   drawLegend(svg, isHi);
-  drawWindowBand(svg, snapshot.ventilationWindow, hourly, '#0F4726', 'vent-hatch', 58);
-  drawWindowBand(svg, snapshot.peakSmogWindow, hourly, '#701111', 'peak-hatch', 76);
+  const ventLabel = drawWindowBand(svg, snapshot.ventilationWindow, hourly, '#0F4726', 'vent-hatch');
+  const peakLabel = drawWindowBand(svg, snapshot.peakSmogWindow, hourly, '#701111', 'peak-hatch');
+  drawHeaderBandLabels(svg, ventLabel, peakLabel);
   drawGridAndAxes(svg, maxY, hourly);
 
   const curHour = Number.isFinite(Number(snapshot.current?.istHour)) ? Number(snapshot.current.istHour) : resolveHourAt(hourly[0], 0);
@@ -283,15 +302,15 @@ function buildDoseSlices(dose, isHi) {
 }
 
 function drawDoseTrackAndSlices(svg, slices, totalRaw) {
-  svg.append(svgEl('rect', { x: 16, y: 14, width: 608, height: 34, rx: 4, fill: '#F1EFEA', stroke: '#CBD2D9', 'stroke-width': 1 }));
+  svg.append(svgEl('rect', { x: 14, y: 14, width: 492, height: 36, rx: 4, fill: '#F1EFEA', stroke: '#CBD2D9', 'stroke-width': 1 }));
   if (totalRaw <= 0) {
     return;
   }
-  let cursor = 16;
+  let cursor = 14;
   for (const s of slices) {
-    const segW = (s.val / totalRaw) * 608;
+    const segW = (s.val / totalRaw) * 492;
     if (segW >= 1) {
-      svg.append(svgEl('rect', { x: cursor.toFixed(1), y: 14, width: segW.toFixed(1), height: 34, fill: s.fill, stroke: s.stroke, 'stroke-width': 1 }));
+      svg.append(svgEl('rect', { x: cursor.toFixed(1), y: 14, width: segW.toFixed(1), height: 36, fill: s.fill, stroke: s.stroke, 'stroke-width': 1 }));
       cursor += segW;
     }
   }
@@ -318,16 +337,16 @@ export function renderDoseBarSvg(svg, impact, lang) {
   const title = svgEl('title', { id: 'dose-bar-title' }, isHi ? '3-भाग फेफड़ों की PM2.5 खुराक' : '3-slice daily inhaled PM2.5 dose breakdown');
   const desc = svgEl('desc', { id: 'dose-bar-desc' }, slices.map((s) => `${s.label}: ${s.val} µg/day`).join('; '));
 
-  svg.setAttribute('viewBox', '0 0 640 156');
+  svg.setAttribute('viewBox', '0 0 520 168');
   svg.replaceChildren(title, desc, defs);
   drawDoseTrackAndSlices(svg, slices, totalRaw);
 
-  let legendY = 74;
+  let legendY = 78;
   for (const s of slices) {
     const pct = totalRaw > 0 ? Math.round((s.val / totalRaw) * 100) : 0;
     const unit = isHi ? 'µg/दिन' : 'µg/day';
-    svg.append(svgEl('rect', { x: 16, y: legendY - 12, width: 16, height: 16, rx: 3, fill: s.fill, stroke: s.stroke, 'stroke-width': 1 }));
-    svg.append(svgEl('text', { x: 40, y: legendY + 1, fill: '#141B24', 'font-size': 14, 'font-weight': 600 }, `${s.label}: ${formatNumber(s.val, lang)} ${unit} (${pct}%)`));
-    legendY += 28;
+    svg.append(svgEl('rect', { x: 14, y: legendY - 13, width: 16, height: 16, rx: 3, fill: s.fill, stroke: s.stroke, 'stroke-width': 1 }));
+    svg.append(svgEl('text', { x: 38, y: legendY + 1, fill: '#141B24', 'font-size': 14, 'font-weight': 600 }, `${s.label}: ${formatNumber(s.val, lang)} ${unit} (${pct}%)`));
+    legendY += 32;
   }
 }

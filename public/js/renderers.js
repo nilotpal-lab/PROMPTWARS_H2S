@@ -1,11 +1,34 @@
 /**
  * @fileoverview Pure DOM renderers (document.createElement + textContent only; zero raw HTML string sinks)
- * for telemetry, simulator readouts, action plan tabs, copilot thread, and RFC 5545 .ics export.
+ * importing deterministic recommender directly from ../lib/recommender.js (zero fallback drift).
  */
 
+import {
+  IAQ_HACKS_DATA,
+  MYTH_BUSTERS_DATA,
+  PROFILE_GUIDANCE_DATA,
+  RED_FLAG_GUIDANCE,
+  buildHeadline,
+  buildMedicalRedFlag,
+  buildThreeAnchorRoutine,
+  buildWhatsappBrief,
+  generateDeterministicPlan
+} from '../lib/recommender.js';
 import { formatNumber, getStrings } from './i18n.js';
 import { getTodayIstKey } from './state.js';
 import { renderPm25Chart, renderHourlyDataTable, renderDoseBarSvg } from './charts.js';
+
+export {
+  IAQ_HACKS_DATA,
+  MYTH_BUSTERS_DATA,
+  PROFILE_GUIDANCE_DATA,
+  RED_FLAG_GUIDANCE,
+  buildHeadline,
+  buildMedicalRedFlag,
+  buildThreeAnchorRoutine,
+  buildWhatsappBrief,
+  generateDeterministicPlan
+};
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -41,79 +64,6 @@ const TOKEN_LABELS = Object.freeze({
     risk: { High: 'उच्च', Moderate: 'मध्यम', Low: 'कम' },
     grap: { 'Stage I': 'चरण I', 'Stage II': 'चरण II', 'Stage III': 'चरण III', 'Stage IV (Severe+)': 'चरण IV (अति गंभीर)' },
     tier: { preset: 'मानक परिदृश्य', 'fallback-preset': 'सुरक्षित मानक', 'live-open-meteo': 'Open-Meteo पूर्वानुमान', cpcb: 'CPCB', waqi: 'WAQI' }
-  }
-});
-
-const FALLBACK_COPY = Object.freeze({
-  en: {
-    redGuidance: 'Medical Alert Active: Keep rescue (reliever) inhalers and heart medicines handy; stop outdoor activity if wheezing or chest tightness starts.',
-    redSigns: ['Persistent breathlessness or chest tightness', 'SpO2 < 94% or bluish lips — seek urgent care'],
-    morningTitle: 'Morning Departure Shield',
-    morningConflict: 'Keep windows shut during morning chill; never mask infants under 2 years.',
-    morningAction: 'Skip dawn jogs; fit a snug N95 for school/commute (>2 yrs).',
-    middayTitle: 'Mid-Day 20-Min Airing',
-    middayConflict: 'Balances high indoor CO₂ (>2,500 ppm) against outdoor smog.',
-    eveningTitle: 'Evening Lock-Down Before Sunset',
-    eveningConflict: 'Prevents sunset air collapse from trapping cooking smoke indoors.',
-    eveningAction: 'Run kitchen exhaust during tadka; zero incense/coils; run indoor filter.',
-    maskRule: 'Use a snug N95 outdoors during poor or severe hours.',
-    priorityAction: 'Run closed-room HEPA or 4-filter DIY CR cube overnight.',
-    iaqHacks: {
-      zero_cost: [
-        { title: 'Kitchen Exhaust During Tadka / Frying', detail: 'Switch on chimney or exhaust before heating oil and shut the kitchen door.' },
-        { title: 'Damp Pocha Instead of Dry Jhadu', detail: 'Damp mopping removes settled dust without tossing fine PM2.5 back into the air.' },
-        { title: 'Zero Indoor Agarbatti or Mosquito Coils', detail: 'Swap coils and incense indoors for window mesh, nets, or electric rackets.' },
-        { title: 'Brief Midday Cross-Ventilation + Door Towel Seal', detail: 'Air out rooms for 15–20 min only in the midday slot, then block bottom door gaps.' }
-      ],
-      diy: [
-        { title: '230V 4-Filter Corsi-Rosenthal Cube (₹2,500–₹4,000)', detail: '230V SAFETY RULE: Tape 4 pleated MERV-13 filters into a cube so low air resistance prevents Indian box fan motor overheating.' },
-        { title: 'Activated Carbon Pre-Wrap for Cooking Odors', detail: 'Wrap a thin carbon sheet outside the 4 filters if tadka fumes linger; replace every 60–90 days.' }
-      ],
-      purifier: [
-        { title: 'True HEPA H13 Matched to Bedroom Size', detail: 'Pick CADR >= 4 × room volume (m³), keep bedroom doors closed, and turn off any ionizer toggle.' }
-      ]
-    },
-    mythBusters: [
-      { myth: 'Houseplants clean indoor PM2.5 smog', reality: 'Negligible effect at home scale: studies show ~600+ plants per m² are needed to match one small purifier.' },
-      { myth: 'Ionizers / plasma purifiers are safer filter-free cleaners', reality: 'Harmful myth: ionizers emit ground-level ozone (O₃) that irritates airways and worsens asthma.' },
-      { myth: 'Washing or boiling N95 masks makes them reusable', reality: 'Destructive myth: soap and water ruin electrostatic fiber charge; air-dry in a paper bag instead.' },
-      { myth: 'Split AC mesh filters block fine PM2.5', reality: 'False: AC plastic screens only trap coarse lint (>10 µm), letting >95% of PM2.5 pass through.' }
-    ]
-  },
-  hi: {
-    redGuidance: 'चिकित्सा सुरक्षा सक्रिय: रिलीवर इन्हेलर और हृदय की दवाएं पास रखें; घरघराहट या सीने में जकड़न होने पर बाहर न जाएं।',
-    redSigns: ['लगातार सांस फूलना या सीने में दर्द', 'SpO2 < 94% या होंठ नीले पड़ना — तुरंत डॉक्टर से मिलें'],
-    morningTitle: 'सुबह का बचाव',
-    morningConflict: 'सुबह की ठंडी धुंध में खिड़कियां बंद रखें; 2 वर्ष से छोटे शिशु को मास्क न पहनाएं।',
-    morningAction: 'सुबह की दौड़ टालें और स्कूल/सफर में फिट N95 का उपयोग करें (>2 वर्ष)।',
-    middayTitle: 'दोपहर में 20 मिनट ताज़ी हवा',
-    middayConflict: 'बंद कमरे की CO₂ (>2,500 ppm) निकालने और धुंध से बचाव में संतुलन।',
-    eveningTitle: 'शाम का लॉक-डाउन',
-    eveningConflict: 'तड़का व अगरबत्ती धुआं कमरे के अंदर फंसने से रोकता है।',
-    eveningAction: 'खाना बनाते समय एग्जॉस्ट चलाएं, अगरबत्ती/कॉइल बंद रखें और फ़िल्टर चलाएं।',
-    maskRule: 'खराब/गंभीर घंटों में बाहर निकलते समय फिट N95 पहनें।',
-    priorityAction: 'सोते समय बंद कमरे में HEPA या 4-फ़िल्टर DIY CR बॉक्स चलाएं।',
-    iaqHacks: {
-      zero_cost: [
-        { title: 'तड़का/तलते समय किचन एग्जॉस्ट चलाएं', detail: 'तेल गर्म करने से पहले चिमनी/एग्जॉस्ट चलाएं और रसोई का दरवाज़ा बंद रखें।' },
-        { title: 'सूखे झाड़ू की जगह गीला पोंछा', detail: 'गीला पोंछा बैठी धूल को हवा में उड़ाए बिना साफ करता है।' },
-        { title: 'घर में अगरबत्ती व मच्छर कॉइल बंद करें', detail: 'अंदर कॉइल/धूप की जगह मच्छरदानी, जाली या इलेक्ट्रिक रैकेट अपनाएं।' },
-        { title: 'दोपहर में संक्षिप्त क्रॉस-वेंटिलेशन + दरवाज़ा सील', detail: 'केवल दोपहर के समय 15–20 मिनट हवा बदलें और बाद में दरवाज़े की दरार बंद करें।' }
-      ],
-      diy: [
-        { title: '230V 4-फ़िल्टर कॉर्सी-रोसेंथल बॉक्स (₹2,500–₹4,000)', detail: '230V सुरक्षा नियम: 4 MERV-13 फ़िल्टर का क्यूब हवा का दबाव कम रखता है जिससे भारतीय पंखे की मोटर गर्म नहीं होती।' },
-        { title: 'तड़का गंध के लिए कार्बन प्री-शीट', detail: 'रसोई की गंध व गैस कम करने के लिए बाहर पतली एक्टिवेटेड कार्बन शीट लगाएं (हर 60–90 दिन में बदलें)।' }
-      ],
-      purifier: [
-        { title: 'कमरे के आकार अनुसार True HEPA H13', detail: '4 × कमरे के आयतन (m³) बराबर CADR चुनें (जैसे 40 m³ के लिए >=160 m³/h) और आयोनाइज़र बंद रखें।' }
-      ]
-    },
-    mythBusters: [
-      { myth: 'इनडोर पौधे घर का PM2.5 साफ करते हैं', reality: 'गलत: एक छोटे प्यूरीफायर बराबर सफाई के लिए प्रति वर्ग मीटर 600+ गमले चाहिए।' },
-      { myth: 'आयोनाइज़र बिना फ़िल्टर हवा साफ करते हैं', reality: 'खतरनाक भ्रम: ये ज़हरीली ओज़ोन (O₃) गैस छोड़ते हैं जो फेफड़ों को नुकसान पहुँचाती है।' },
-      { myth: 'N95 मास्क धोने या उबालने से नया हो जाता है', reality: 'गलत: पानी व साबुन इलेक्ट्रोस्टैटिक चार्ज नष्ट कर देते हैं; इसे केवल कागज़ के बैग में हवा में सुखाएं।' },
-      { myth: 'स्प्लिट एसी की जाली PM2.5 रोकती है', reality: 'गलत: प्लास्टिक जाली केवल मोटी धूल (>10 µm) रोकती है; >95% PM2.5 आर-पार निकल जाता है।' }
-    ]
   }
 });
 
@@ -163,10 +113,13 @@ export function collectDomRefs(doc) {
     'hero-source-tier', 'hero-location-city', 'hero-band-badge', 'hero-band-icon', 'hero-band-text',
     'hero-naqi', 'hero-pm25', 'hero-pm10', 'hero-no2', 'hero-co', 'calibration-status', 'data-attribution',
     'vent-confidence-badge', 'vent-window-label', 'vent-window-detail', 'peak-window-label',
+    'tomorrow-window-row', 'tomorrow-window-label',
     'diurnal-swing-badge', 'what-changed-summary', 'hero-pbl', 'hero-wind', 'hero-vc',
     'pm25-chart-svg', 'pm25-table-body', 'pm25-table-wrap', 'toggle-table-btn',
     'sim-dose-value', 'sim-reduced-value', 'sim-indoor-value', 'infant-mask-warning',
-    'room-volume-display', 'outdoor-hours-display', 'cadr-gate-badge',
+    'room-volume-range', 'room-volume-display', 'outdoor-hours-range', 'outdoor-hours-display', 'cadr-gate-badge',
+    'daily-km-input', 'daily-km-error', 'commute-days-input', 'commute-days-error',
+    'city-input', 'gps-locate-btn', 'calibrated-aqi-input', 'clear-calibration-btn',
     'plan-source-badge', 'plan-headline', 'medical-red-flag-banner', 'red-flag-guidance', 'red-flag-signs',
     'routine-anchors', 'profile-guidance-list', 'iaq-hacks-container', 'myth-busters-list',
     'swap-co2-value', 'swap-pm25-value', 'community-multipliers-body',
@@ -174,7 +127,7 @@ export function collectDomRefs(doc) {
     'dose-summary-line', 'dose-bar-svg', 'cig-value', 'cig-disclaimer', 'box-cin-value', 'box-meta-line',
     'math-details-body', 'print-sheet-title', 'print-sheet-summary', 'print-sheet-anchors', 'print-sheet-safety',
     'copilot-dialog', 'copilot-grounded-meta', 'copilot-quick-chips', 'copilot-messages', 'copilot-status',
-    'copilot-input', 'copilot-send-btn', 'simulator-live', 'clear-calibration-btn', 'calibrated-aqi-input', 'footer-attribution'
+    'copilot-input', 'copilot-send-btn', 'simulator-live', 'footer-attribution'
   ];
   const refs = {};
   for (const id of ids) {
@@ -308,6 +261,23 @@ function renderHeroMetrics(refs, snapshot, cur, lang) {
   setText(refs['footer-attribution'], attrText);
 }
 
+function renderTomorrowWindowRow(refs, tomorrow, confTokens, lang) {
+  const tomorrowRow = refs['tomorrow-window-row'];
+  if (!tomorrowRow) {
+    return;
+  }
+  const hasTomorrow = Boolean(tomorrow && tomorrow.label);
+  tomorrowRow.hidden = !hasTomorrow;
+  if (!hasTomorrow) {
+    setText(refs['tomorrow-window-label'], '—');
+    return;
+  }
+  const tomAvg = formatNumber(Math.round(Number(tomorrow.avgPm25) || 0), lang);
+  const tomConf = confTokens[tomorrow.confidence] || '';
+  const suffix = tomConf ? ` · ${tomConf}` : '';
+  setText(refs['tomorrow-window-label'], `${tomorrow.label} (~${tomAvg} µg/m³${suffix})`);
+}
+
 function renderVentCard(refs, snapshot, lang) {
   const win = snapshot.ventilationWindow || {};
   const peak = snapshot.peakSmogWindow || {};
@@ -319,6 +289,7 @@ function renderVentCard(refs, snapshot, lang) {
 
   const peakPm = formatNumber(Math.round(Number(peak.maxPm25) || 0), lang);
   setText(refs['peak-window-label'], `${peak.label || '20:00–22:00 IST'} (${peakPm} µg/m³)`);
+  renderTomorrowWindowRow(refs, snapshot.tomorrowWindow, confTokens, lang);
 }
 
 function renderChangedCard(refs, snapshot, cur, lang) {
@@ -407,13 +378,15 @@ function renderMathBody(container, impact, snapshot, lang) {
         `1. इनडोर बॉक्स मॉडल: C_in = (0.75 × ACH × C_out + G/V) / (ACH + 0.35 + CADR/V) = ${formatNumber(box.cInUgM3, lang, 1)} µg/m³ (I/O = ${formatNumber(box.indoorOutdoorRatio, lang, 2)})।`,
         `2. फेफड़ों की खुराक: बाहर (${formatNumber(dose.commuteOutdoor, lang)} µg) + रसोई/इनडोर स्रोत (${formatNumber(dose.cookingIndoor, lang)} µg) + आधार इनडोर (${formatNumber(dose.baselineIndoor, lang)} µg) = ${formatNumber(dose.totalMitigatedUg, lang)} µg/दिन।`,
         `3. वयस्क सिगरेट समतुल्य: औसत 24h सांद्रता ÷ 22 µg/m³ = ${formatNumber(impact.adultCigaretteEquivalent, lang, 1)} सिगरेट/दिन (केवल वयस्क मानक; शिशु के लिए लागू नहीं)।`,
-        `4. CO रूपांतरण व मिश्रण: CPCB CO को µg/m³ से ÷1000 कर mg/m³ (${formatNumber(Number(cur.coMgM3), lang, 2)} mg/m³) में बदला जाता है; गति = ${formatNumber(Number(cur.ventilationCoefficient), lang)} m²/s।`
+        `4. CO रूपांतरण व मिश्रण: CPCB CO को µg/m³ से ÷1000 कर mg/m³ (${formatNumber(Number(cur.coMgM3), lang, 2)} mg/m³) में बदला जाता है; गति = ${formatNumber(Number(cur.ventilationCoefficient), lang)} m²/s।`,
+        '5. प्रति-घंटा NAQI अनुमान: प्रति-घंटा Open-Meteo CAMS मॉडल मानों को तात्कालिक गंभीरता अनुमान के रूप में 24-घंटे CPCB NAQI मानकों पर मैप किया जाता है।'
       ]
     : [
         `1. Steady-state indoor box: C_in = (0.75 × ACH × C_out + G/V) / (ACH + 0.35 + CADR/V) = ${formatNumber(box.cInUgM3, lang, 1)} µg/m³ (I/O ratio = ${formatNumber(box.indoorOutdoorRatio, lang, 2)}).`,
         `2. Segmented dose (10 µg rounded): Outdoor (${formatNumber(dose.commuteOutdoor, lang)} µg) + Cooking/Sources (${formatNumber(dose.cookingIndoor, lang)} µg) + Baseline Indoor (${formatNumber(dose.baselineIndoor, lang)} µg) = ${formatNumber(dose.totalMitigatedUg, lang)} µg/day vs ${formatNumber(dose.totalBaselineUg, lang)} µg unmitigated.`,
         `3. Berkeley Earth adult equivalence: Effective 24h concentration ÷ 22 µg/m³ = ${formatNumber(impact.adultCigaretteEquivalent, lang, 1)} cig/day (never divided by infant lung volume).`,
-        `4. Unit & mixing checks: Open-Meteo CO µg/m³ ÷ 1000 = ${formatNumber(Number(cur.coMgM3), lang, 2)} mg/m³; Air Clearing Speed = ${formatNumber(Number(cur.pblMeters), lang)} m × ${formatNumber(Number(cur.windSpeed10mMs), lang, 1)} m/s = ${formatNumber(Number(cur.ventilationCoefficient), lang)} m²/s.`
+        `4. Unit & mixing checks: Open-Meteo CO µg/m³ ÷ 1000 = ${formatNumber(Number(cur.coMgM3), lang, 2)} mg/m³; Air Clearing Speed = ${formatNumber(Number(cur.pblMeters), lang)} m × ${formatNumber(Number(cur.windSpeed10mMs), lang, 1)} m/s = ${formatNumber(Number(cur.ventilationCoefficient), lang)} m²/s.`,
+        '5. Hourly NAQI estimate: Hourly modeled Open-Meteo CAMS concentrations are mapped onto 24-hour CPCB NAQI breakpoints as a real-time hourly severity estimate.'
       ];
   container.replaceChildren(...lines.map((line) => el('p', null, line)));
 }
@@ -450,7 +423,7 @@ function updateInfantSafetyVisibility(refs, impact, household) {
 }
 
 /**
- * Render 0ms instant simulator KPIs, infant safety rule, CADR gate, and math disclosures.
+ * Render 0ms instant simulator KPIs, slider aria-valuetext, infant safety rule, CADR gate, and math disclosures.
  * @param {Record<string, HTMLElement | null>} refs
  * @param {Record<string, unknown>} impact
  * @param {Record<string, unknown>} household
@@ -464,13 +437,25 @@ export function renderSimulatorReadout(refs, impact, household, snapshot, lang) 
   const isHi = lang === 'hi';
   const dose = impact.dose || {};
   const box = impact.indoorBox || {};
+  const roomText = formatRoomVolumeLabel(household.roomVolumeM3, lang);
+  const hoursFormatted = formatNumber(Number(household.outdoorHours), lang, 1);
 
   setText(refs['sim-dose-value'], `${formatNumber(dose.totalMitigatedUg, lang)} ${isHi ? 'µg/दिन' : 'µg/day'}`);
   setText(refs['sim-reduced-value'], `-${formatNumber(dose.percentReduced, lang)}% (${formatNumber(dose.avoidedUg, lang)} µg)`);
   setText(refs['sim-indoor-value'], `${formatNumber(box.cInUgM3, lang, 1)} µg/m³ (${formatNumber(box.indoorOutdoorRatio, lang, 2)}×)`);
-  setText(refs['room-volume-display'], formatRoomVolumeLabel(household.roomVolumeM3, lang));
-  setText(refs['outdoor-hours-display'], `${formatNumber(Number(household.outdoorHours), lang, 1)} ${isHi ? 'घंटे' : 'h'}`);
+  setText(refs['room-volume-display'], roomText);
+  setText(refs['outdoor-hours-display'], `${hoursFormatted} ${isHi ? 'घंटे' : 'h'}`);
   setText(refs['cadr-gate-badge'], formatCadrGateText(box, lang));
+
+  if (refs['room-volume-range']) {
+    refs['room-volume-range'].setAttribute('aria-valuetext', roomText);
+  }
+  if (refs['outdoor-hours-range']) {
+    refs['outdoor-hours-range'].setAttribute(
+      'aria-valuetext',
+      `${hoursFormatted} ${isHi ? 'घंटे प्रतिदिन' : 'hours per day'}`
+    );
+  }
 
   updateInfantSafetyVisibility(refs, impact, household);
   setText(refs['swap-co2-value'], `${formatNumber(impact.co2eSavedKgPerWeek, lang, 1)} ${isHi ? 'kg/सप्ताह' : 'kg/wk'}`);
@@ -479,101 +464,69 @@ export function renderSimulatorReadout(refs, impact, household, snapshot, lang) 
   renderDoseAndBoxCards(refs, impact, snapshot, lang);
 }
 
-function buildFallbackRoutine(copy, winLabel, isHi) {
-  const middayAct = isHi
-    ? `${winLabel} के दौरान 15–20 मिनट क्रॉस-वेंटिलेशन करें।`
-    : `Cross-ventilate 15–20 min during ${winLabel}.`;
-  return [
-    { id: 'morning_shield', timeWindow: '06:30–09:00 IST', title: copy.morningTitle, conflictNote: copy.morningConflict, actions: [copy.morningAction] },
-    { id: 'midday_flush', timeWindow: winLabel, title: copy.middayTitle, conflictNote: copy.middayConflict, actions: [middayAct] },
-    { id: 'evening_lockdown', timeWindow: '17:30–22:00 IST', title: copy.eveningTitle, conflictNote: copy.eveningConflict, actions: [copy.eveningAction] }
-  ];
+function updateAnchorCardInPlace(card, item, checked, dict) {
+  const checkbox = card.querySelector('input[type="checkbox"]');
+  if (checkbox) {
+    checkbox.checked = checked;
+  }
+  setText(card.querySelector('.anchor-title-text'), `${item.title} (${dict.anchorDoneLabel})`);
+  setText(card.querySelector('.status-pill'), item.timeWindow);
+  setText(card.querySelector('.anchor-conflict-note'), item.conflictNote || '');
+  const ul = card.querySelector('.bullet-list');
+  if (ul) {
+    ul.replaceChildren(...(item.actions || []).map((act) => el('li', null, act)));
+  }
 }
 
-function buildFallbackGuidance(profiles, copy, dict, winLabel, isHi) {
-  const outRule = isHi ? `बाहरी काम केवल ${winLabel} में सीमित रखें।` : `Keep outdoor trips brief outside ${winLabel}.`;
-  return profiles.map((id) => ({
-    profileId: id,
-    label: String(dict[`prof_${id}`] || id),
-    maskRule: id === 'infant' ? String(dict.infantMaskBlock) : copy.maskRule,
-    outdoorRule: outRule,
-    priorityAction: copy.priorityAction
-  }));
-}
+function buildAnchorCard(item, checked, dict, onToggleCheck) {
+  const card = el('article', 'anchor-card');
+  card.dataset.anchorId = item.id;
+  const head = el('div', 'anchor-header');
+  const checkLabel = el('label', 'anchor-check-label');
+  const checkbox = el('input');
+  checkbox.type = 'checkbox';
+  checkbox.dataset.anchorId = item.id;
+  checkbox.checked = checked;
+  checkbox.addEventListener('change', () => onToggleCheck(item.id, checkbox.checked));
+  checkLabel.append(checkbox, el('span', 'anchor-title-text', `${item.title} (${dict.anchorDoneLabel})`));
 
-function resolveActiveProfiles(household) {
-  const raw = household ? household.profiles : null;
-  return Array.isArray(raw) && raw.length > 0 ? raw : ['commuter'];
-}
+  head.append(checkLabel, el('span', 'status-pill tabular-nums', item.timeWindow));
+  card.append(head, el('p', 'muted-caption anchor-conflict-note', item.conflictNote || ''));
 
-function hasSensitiveProfile(profiles) {
-  return profiles.includes('asthmatic') || profiles.includes('elderly_cardiac');
-}
-
-function readSnapshotFields(snapshot) {
-  const s = snapshot || {};
-  return {
-    naqi: Number(s.current?.naqi) || 0,
-    winLabel: s.ventilationWindow?.label || '13:00–15:00 IST',
-    city: s.location?.city || 'City'
-  };
-}
-
-function buildFallbackPlan(snapshot, impact, household, lang) {
-  const isHi = lang === 'hi';
-  const copy = isHi ? FALLBACK_COPY.hi : FALLBACK_COPY.en;
-  const dict = getStrings(lang);
-  const { naqi, winLabel, city } = readSnapshotFields(snapshot);
-  const profiles = resolveActiveProfiles(household);
-  const redActive = naqi > 300 || hasSensitiveProfile(profiles);
-  const severity = naqi > 400 && redActive ? 'critical' : redActive ? 'elevated' : 'none';
-  const pct = impact?.dose?.percentReduced || 0;
-
-  const headline = isHi
-    ? `${city}: NAQI ${formatNumber(naqi, lang)}। इन बदलावों से फेफड़ों का PM2.5 भार ${formatNumber(pct, lang)}% घटता है।`
-    : `${city}: NAQI ${formatNumber(naqi, lang)}. Routing outdoor hours and indoor fixes cuts daily inhaled dose by ${formatNumber(pct, lang)}%.`;
-  const brief = isHi
-    ? `VayuMitra (${city}): NAQI ${formatNumber(naqi, lang)}। दोपहर वेंटिलेशन समय: ${winLabel}।`
-    : `VayuMitra Brief (${city}): NAQI ${formatNumber(naqi, lang)}. Best daytime window: ${winLabel}.`;
-
-  return {
-    lang,
-    headlinePlainEnglish: headline,
-    medicalRedFlag: { active: redActive, severity, guidance: copy.redGuidance, emergencySigns: copy.redSigns },
-    threeAnchorRoutine: buildFallbackRoutine(copy, winLabel, isHi),
-    profileGuidance: buildFallbackGuidance(profiles, copy, dict, winLabel, isHi),
-    iaqHacks: copy.iaqHacks,
-    mythBusters: copy.mythBusters,
-    commuteAndCommunity: { whatsappBrief: brief }
-  };
+  const ul = el('ul', 'bullet-list');
+  for (const act of item.actions || []) {
+    ul.append(el('li', null, act));
+  }
+  card.append(ul);
+  return card;
 }
 
 function renderAnchors(refs, anchors, checklist, lang, onToggleCheck) {
-  if (!refs['routine-anchors']) {
+  const container = refs['routine-anchors'];
+  if (!container) {
     return;
   }
   const dict = getStrings(lang);
-  const cards = (anchors || []).map((item) => {
-    const card = el('article', 'anchor-card');
-    const head = el('div', 'anchor-header');
-    const checkLabel = el('label', 'anchor-check-label');
-    const checkbox = el('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = Boolean(checklist[item.id]);
-    checkbox.addEventListener('change', () => onToggleCheck(item.id, checkbox.checked));
-    checkLabel.append(checkbox, el('span', null, `${item.title} (${dict.anchorDoneLabel})`));
+  const list = anchors || [];
+  const existing = Array.from(container.children);
+  const sameOrder =
+    existing.length === list.length &&
+    list.every((item, idx) => existing[idx]?.dataset?.anchorId === item.id);
 
-    head.append(checkLabel, el('span', 'status-pill tabular-nums', item.timeWindow));
-    card.append(head, el('p', 'muted-caption', item.conflictNote || ''));
-
-    const ul = el('ul', 'bullet-list');
-    for (const act of item.actions || []) {
-      ul.append(el('li', null, act));
+  if (sameOrder) {
+    for (const [idx, item] of list.entries()) {
+      updateAnchorCardInPlace(existing[idx], item, Boolean(checklist[item.id]), dict);
     }
-    card.append(ul);
-    return card;
-  });
-  refs['routine-anchors'].replaceChildren(...cards);
+    return;
+  }
+
+  const activeEl = container.ownerDocument?.activeElement;
+  const focusedAnchorId = activeEl && container.contains(activeEl) ? activeEl.dataset?.anchorId : null;
+  const cards = list.map((item) => buildAnchorCard(item, Boolean(checklist[item.id]), dict, onToggleCheck));
+  container.replaceChildren(...cards);
+  if (focusedAnchorId) {
+    container.querySelector(`input[data-anchor-id="${focusedAnchorId}"]`)?.focus();
+  }
 }
 
 function renderProfileGuidance(container, list, lang) {
@@ -660,8 +613,18 @@ function renderPrintSheet(refs, snapshot, plan, lang) {
   setText(refs['print-sheet-safety'], plan.medicalRedFlag?.active ? plan.medicalRedFlag.guidance : '');
 }
 
+function resolvePlanBadgeLabel(dict, state, lang) {
+  if (state.plan?.lang === lang && state.planSource === 'gemini') {
+    return dict.sourceGemini;
+  }
+  if (state.planSource === 'error-fallback') {
+    return dict.sourcePlanOffline;
+  }
+  return dict.sourceFallback;
+}
+
 /**
- * Render all 4 Action Plan tab panels + print sheet from API plan or deterministic fallback.
+ * Render all 4 Action Plan tab panels + print sheet from API plan or deterministic recommender.
  * @param {Record<string, HTMLElement | null>} refs
  * @param {Record<string, unknown>} state
  * @param {(anchorId: string, checked: boolean) => void} onToggleCheck
@@ -669,12 +632,16 @@ function renderPrintSheet(refs, snapshot, plan, lang) {
 export function renderPlanSections(refs, state, onToggleCheck) {
   const lang = state.lang === 'hi' ? 'hi' : 'en';
   const dict = getStrings(lang);
-  const hasMatchingGemini = state.plan?.lang === lang && state.planSource === 'gemini';
   const plan = state.plan?.lang === lang
     ? state.plan
-    : buildFallbackPlan(state.snapshot, state.impact, state.household, lang);
+    : generateDeterministicPlan({
+        snapshot: state.snapshot,
+        impact: state.impact,
+        ...state.household,
+        lang
+      });
 
-  setText(refs['plan-source-badge'], hasMatchingGemini ? dict.sourceGemini : dict.sourceFallback);
+  setText(refs['plan-source-badge'], resolvePlanBadgeLabel(dict, state, lang));
   setText(refs['plan-headline'], plan.headlinePlainEnglish || '');
   renderMedicalRedFlag(refs, plan.medicalRedFlag);
 
@@ -717,8 +684,29 @@ function renderQuickChips(container, quickChips, lang, onQuickChip) {
   container.replaceChildren(...chips);
 }
 
+function syncCopilotMessages(msgBox, messages, lang) {
+  if (!msgBox) {
+    return;
+  }
+  const list = Array.isArray(messages) ? messages : [];
+  const prevCount = Number(msgBox.dataset.renderedCount || '0');
+  const prevLang = msgBox.dataset.renderedLang || '';
+  const needsRebuild = prevLang !== lang || list.length < prevCount || msgBox.children.length !== prevCount;
+
+  if (needsRebuild) {
+    msgBox.replaceChildren(...list.map(buildChatBubble));
+  } else if (list.length > prevCount) {
+    msgBox.append(...list.slice(prevCount).map(buildChatBubble));
+  }
+  msgBox.dataset.renderedCount = String(list.length);
+  msgBox.dataset.renderedLang = lang;
+  if (needsRebuild || list.length > prevCount) {
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+}
+
 /**
- * Render quick-ask chips (only when language changes) and chat thread with auto-scroll.
+ * Render quick-ask chips and incrementally append newly added chat bubbles (rebuilding only on clear or language switch).
  * @param {Record<string, HTMLElement | null>} refs
  * @param {readonly Record<string, unknown>[]} messages
  * @param {Record<string, unknown>} snapshot
@@ -734,11 +722,7 @@ export function renderCopilotPanel(refs, messages, snapshot, lang, onQuickChip) 
   setText(refs['copilot-grounded-meta'], `${city} · NAQI ${naqiText} · ${win}`);
 
   renderQuickChips(refs['copilot-quick-chips'], dict.quickChips, lang, onQuickChip);
-  const msgBox = refs['copilot-messages'];
-  if (msgBox) {
-    msgBox.replaceChildren(...(messages || []).map(buildChatBubble));
-    msgBox.scrollTop = msgBox.scrollHeight;
-  }
+  syncCopilotMessages(refs['copilot-messages'], messages, lang);
 }
 
 function escapeIcsText(text) {
