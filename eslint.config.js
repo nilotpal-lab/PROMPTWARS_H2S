@@ -169,7 +169,7 @@ export default [
     rules: SHARED_RULES
   },
   {
-    files: ["lib/**/*.js"],
+    files: ["lib/**/*.js", "public/lib/**/*.js"],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: "module",

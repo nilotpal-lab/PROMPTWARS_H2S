@@ -10,8 +10,10 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "sync:lib": "node scripts/sync-lib.mjs",
     "lint": "eslint . --max-warnings 0",
     "test": "node --test test/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage test/*.test.js",
     "check": "npm run lint && npm test"
   },
   "dependencies": {

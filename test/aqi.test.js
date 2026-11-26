@@ -140,15 +140,22 @@ describe('lib/aqi.js — CPCB NAQI, Unit Conversions & PBL Physics', () => {
     assert.ok(SCENARIO_PRESETS['igp-very-poor']);
     assert.ok(SCENARIO_PRESETS['coastal-moderate']);
 
-    const delhi = buildAirQualitySnapshot({ presetId: 'delhi-severe' });
+    const delhi = buildAirQualitySnapshot({ presetId: 'delhi-severe', currentHourIst: 8 });
     assert.equal(delhi.hourly24h.length, 24);
+    assert.equal(delhi.current.istHour, 8);
     assert.ok(delhi.current.naqi >= 300);
     assert.equal(delhi.current.inversionRisk, 'High');
+    assert.equal(delhi.tomorrowWindow, null);
     assert.ok(delhi.ventilationWindow.startHour >= 9 && delhi.ventilationWindow.endHour <= 18);
     assert.ok(delhi.whatChangedToday.summaryEn.length > 10);
 
+    const expectedIstHour = new Date(Date.now() + 19800000).getUTCHours();
+    const dynamicDelhi = buildAirQualitySnapshot({ presetId: 'delhi-severe' });
+    assert.equal(dynamicDelhi.current.istHour, expectedIstHour);
+
     const waqiCalibrated = buildAirQualitySnapshot({
       presetId: 'coastal-moderate',
+      currentHourIst: 9,
       waqiUsEpaPm25Aqi: 149,
       yesterday: { peakPm25: 40, naqi: 70 }
     });
@@ -205,5 +212,85 @@ describe('lib/aqi.js — CPCB NAQI, Unit Conversions & PBL Physics', () => {
     const calibrated = applyPblCalibration(zeroHourly, 180, 0);
     assert.equal(calibrated[0].pm25, 180);
     assert.equal(calibrated[1].pm25, 36);
+    assert.equal(calibrated[0].naqi, undefined);
+  });
+
+  it('never pairs non-contiguous daytime hours in collectTwoHourPairs', () => {
+    const gapped = [
+      { istHour: 10, pm25: 35, pblMeters: 950, windSpeed10mMs: 2.2 },
+      { istHour: 15, pm25: 40, pblMeters: 1000, windSpeed10mMs: 2.5 },
+      { istHour: 12, pm25: 75, pblMeters: 900, windSpeed10mMs: 2.0 },
+      { istHour: 13, pm25: 80, pblMeters: 950, windSpeed10mMs: 2.1 }
+    ];
+    const win = findVentilationWindow(gapped);
+    assert.equal(win.isDaytime, true);
+    assert.equal(win.startHour, 12);
+    assert.equal(win.endHour, 14);
+    assert.equal(win.label, '12:00–14:00 IST');
+
+    const onlyNonContiguousDaytime = [
+      { istHour: 10, pm25: 35, pblMeters: 950, windSpeed10mMs: 2.2 },
+      { istHour: 15, pm25: 40, pblMeters: 1000, windSpeed10mMs: 2.5 },
+      { istHour: 20, pm25: 190, pblMeters: 300, windSpeed10mMs: 1.0 },
+      { istHour: 21, pm25: 200, pblMeters: 280, windSpeed10mMs: 0.9 }
+    ];
+    const noDayPair = findVentilationWindow(onlyNonContiguousDaytime);
+    assert.equal(noDayPair.isDaytime, false);
+    assert.equal(noDayPair.startHour, 20);
+    assert.equal(noDayPair.endHour, 22);
+  });
+
+  it('parses explicit Z, +00:00, and +05:30 timestamps to IST hours accurately', () => {
+    const series = [
+      { time: '2026-11-25T08:00:00+00:00', pm25: 70, pblMeters: 950, windSpeed10mMs: 2.2 },
+      { time: '2026-11-25T14:00+05:30', pm25: 75, pblMeters: 1000, windSpeed10mMs: 2.4 },
+      { time: '2026-11-25T20:00:00Z', pm25: 180, pblMeters: 250, windSpeed10mMs: 0.9 }
+    ];
+    const snap = buildAirQualitySnapshot({ city: 'Jaipur', source: 'open-meteo', hourly24h: series });
+    assert.equal(snap.hourly24h[0].istHour, 13);
+    assert.equal(snap.hourly24h[1].istHour, 14);
+    assert.equal(snap.hourly24h[2].istHour, 1);
+    assert.equal(snap.ventilationWindow.isDaytime, true);
+    assert.equal(snap.ventilationWindow.startHour, 13);
+    assert.equal(snap.ventilationWindow.endHour, 15);
+  });
+
+  it('keeps hourly24h capped at 24h and computes tomorrowWindow when >24h series is provided', () => {
+    const series48h = Array.from({ length: 48 }, (_, i) => {
+      const h = i % 24;
+      const isTomorrow = i >= 24;
+      const pm25 = !isTomorrow
+        ? (h >= 12 && h <= 13 ? 85 : 220)
+        : (h >= 14 && h <= 15 ? 55 : 240);
+      return {
+        time: `2026-11-${isTomorrow ? '26' : '25'}T${String(h).padStart(2, '0')}:00`,
+        pm25,
+        pblMeters: h >= 11 && h <= 16 ? 1100 : 260,
+        windSpeed10mMs: h >= 11 && h <= 16 ? 2.6 : 0.9
+      };
+    });
+
+    const from48Field = buildAirQualitySnapshot({
+      city: 'Delhi',
+      source: 'open-meteo',
+      hourly48h: series48h
+    });
+    assert.equal(from48Field.hourly24h.length, 24);
+    assert.equal(from48Field.ventilationWindow.startHour, 12);
+    assert.equal(from48Field.ventilationWindow.endHour, 14);
+    assert.ok(from48Field.tomorrowWindow);
+    assert.equal(from48Field.tomorrowWindow.startHour, 14);
+    assert.equal(from48Field.tomorrowWindow.endHour, 16);
+    assert.equal(from48Field.tomorrowWindow.avgPm25, 55);
+    assert.equal(from48Field.tomorrowWindow.confidence, 'safe');
+
+    const fromOversized24Field = buildAirQualitySnapshot({
+      city: 'Delhi',
+      source: 'open-meteo',
+      hourly24h: series48h
+    });
+    assert.equal(fromOversized24Field.hourly24h.length, 24);
+    assert.equal(fromOversized24Field.tomorrowWindow.startHour, 14);
+    assert.equal(fromOversized24Field.tomorrowWindow.endHour, 16);
   });
 });
