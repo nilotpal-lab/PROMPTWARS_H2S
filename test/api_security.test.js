@@ -60,8 +60,8 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
       env,
       airQualityService,
       geminiService,
-      aqiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 6 }),
-      aiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 4 })
+      aqiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 10 }),
+      aiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 10 })
     });
 
     const started = await listenEphemeral(app);
@@ -121,16 +121,24 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
     assert.equal(badCoords.status, 400);
     const protoQuery = await fetch(`${baseUrl}/api/aqi?__proto__=polluted`);
     assert.equal(protoQuery.status, 400);
+
+    // Stale responses must emit Cache-Control: no-store
+    const staleRes = await fetch(`${baseUrl}/api/aqi?city=Patna`);
+    assert.equal(staleRes.status, 200);
+    assert.equal(staleRes.headers.get('cache-control'), 'no-store');
+    const staleBody = await staleRes.json();
+    assert.equal(staleBody.stale, true);
   });
 
-  it('validates /api/plan and /api/chat, contains prompt injection, and enforces infant mask block', async () => {
+  it('validates /api/plan and /api/chat, preserves profile over profiles[0], blocks non-string lang DoS, and contains prompt injection', async () => {
     const planRes = await fetch(`${baseUrl}/api/plan`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         preset: 'delhi-severe',
         lang: 'hi',
-        profiles: ['infant', 'commuter'],
+        profile: 'elderly_cardiac',
+        profiles: ['infant', 'elderly_cardiac'],
         maskType: 'n95',
         purifierMode: 'diy_cr_box',
         roomVolumeM3: 40,
@@ -140,9 +148,29 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
     assert.equal(planRes.status, 200);
     assert.equal(planRes.headers.get('cache-control'), 'no-store');
     const planBody = await planRes.json();
-    assert.equal(planBody.impact.mask.blockedForInfant, true);
-    assert.equal(planBody.impact.mask.effective, 'none');
+    assert.equal(planBody.impact.profile, 'elderly_cardiac');
+    assert.equal(planBody.impact.mask.blockedForInfant, false);
+    assert.equal(planBody.impact.mask.effective, 'n95');
     assert.equal(planBody.plan.lang, 'hi');
+
+    const infantPlanRes = await fetch(`${baseUrl}/api/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ preset: 'delhi-severe', profiles: ['infant', 'commuter'], maskType: 'n95' })
+    });
+    assert.equal(infantPlanRes.status, 200);
+    const infantPlanBody = await infantPlanRes.json();
+    assert.equal(infantPlanBody.impact.profile, 'infant');
+    assert.equal(infantPlanBody.impact.mask.blockedForInfant, true);
+    assert.equal(infantPlanBody.impact.mask.effective, 'none');
+
+    const badLangChat = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'hi', lang: { toString: null } })
+    });
+    assert.equal(badLangChat.status, 400);
+    assert.equal((await badLangChat.json()).error.code, 'INVALID_REQUEST');
 
     const chatRes = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
@@ -209,30 +237,37 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
     }
   });
 
-  it('enforces 429 rate limits with Retry-After and trusts proxy when VERCEL=1', async () => {
+  it('enforces unified ai 429 rate limits across /api/plan and /api/chat with Retry-After and trusts proxy when VERCEL=1', async () => {
     const vercelApp = createApp({
       env: { VERCEL: '1' },
-      aiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 1 })
+      aiLimiter: createSlidingRateLimiter({ windowMs: 60_000, maxRequests: 2 })
     });
     assert.equal(vercelApp.get('trust proxy'), 1);
 
     const started = await listenEphemeral(vercelApp);
     try {
-      const first = await fetch(`${started.baseUrl}/api/chat`, {
+      const first = await fetch(`${started.baseUrl}/api/plan`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
-        body: JSON.stringify({ message: 'Hello?' })
+        body: JSON.stringify({ preset: 'delhi-severe', profiles: ['commuter'] })
       });
       assert.equal(first.status, 200);
 
       const second = await fetch(`${started.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
+        body: JSON.stringify({ message: 'Hello?' })
+      });
+      assert.equal(second.status, 200);
+
+      const third = await fetch(`${started.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
         body: JSON.stringify({ message: 'Hello again?' })
       });
-      assert.equal(second.status, 429);
-      assert.ok(Number(second.headers.get('retry-after')) >= 1);
-      const body = await second.json();
+      assert.equal(third.status, 429);
+      assert.ok(Number(third.headers.get('retry-after')) >= 1);
+      const body = await third.json();
       assert.equal(body.error.code, 'RATE_LIMITED');
     } finally {
       await new Promise((resolve) => started.server.close(resolve));

@@ -267,10 +267,12 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
     assert.equal(delhi.current.coMgM3, 0.8);
     assert.equal(delhi.current.windSpeed10mMs, 1);
     assert.equal(delhi.calibration.source, 'cpcb-data-gov-in');
-    assert.equal(delhi.calibration.observedPm25, 260);
+    // Sub-index 260 (without raw ug/m3 unit) converts via cpcbPm25SubIndexToUgM3 -> 108 ug/m3
+    assert.equal(delhi.calibration.observedPm25, 108);
     assert.equal(delhi.regionalContext.fireAlert.active, true);
     assert.equal(delhi.regionalContext.fireAlert.fireCount, 26);
     assert.ok(requestedUrls.some((u) => u.includes('/feed/geo:28.6139;77.209/')));
+    assert.ok(requestedUrls.some((u) => u.includes('filters%5Bpollutant_id%5D=PM2.5')));
 
     // Cached second call with user calibration should not re-fetch upstream
     const beforeCalls = requestedUrls.length;
@@ -278,6 +280,12 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
     assert.equal(requestedUrls.length, beforeCalls);
     assert.equal(userCal.calibration.observedPm25, 150);
     assert.equal(userCal.calibration.source, 'user-calibrated');
+
+    // Coordinate query with FakeCity must NOT poison subsequent ?city=Delhi label
+    const fakeLabeled = await svc.getAirQuality({ lat: 28.6139, lon: 77.209, city: 'FakeCity' });
+    assert.equal(fakeLabeled.location.city, 'FakeCity');
+    const delhiAgain = await svc.getAirQuality({ city: 'Delhi' });
+    assert.equal(delhiAgain.location.city, 'Delhi');
 
     // Non-IGP city (Mumbai) must NOT query NASA FIRMS
     const mumbai = await svc.getAirQuality({ lat: 19.076, lon: 72.8777 });
@@ -294,7 +302,7 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
       now: () => clock,
       env: {}
     });
-    const staleRes = await failSvc.getAirQuality({ lat: 28.6139, lon: 77.209 });
+    const staleRes = await failSvc.getAirQuality({ city: 'Delhi' });
     assert.equal(staleRes.stale, true);
     assert.equal(staleRes.location.city, 'Delhi');
 
@@ -311,6 +319,63 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
     assert.equal(presetFallback.sourceTier, 'fallback-preset');
     assert.equal(presetFallback.stale, true);
     assert.equal(presetFallback.location.presetId, 'coastal-moderate');
+  });
+
+  it('prevents coordinate cache poisoning across FakeCity -> Delhi and interpolates null Open-Meteo pm2_5 slots', async () => {
+    const aqGapPayload = makeOpenMeteoAqPayload();
+    aqGapPayload.hourly.pm2_5[0] = 100;
+    aqGapPayload.hourly.pm2_5[1] = null;
+    aqGapPayload.hourly.pm2_5[2] = undefined;
+    aqGapPayload.hourly.pm2_5[3] = 160;
+
+    const clock = new Date('2026-11-25T00:00:00+05:30').getTime();
+    const cache = createTtlCache({ now: () => clock });
+    const svc = createAirQualityService({
+      cache,
+      now: () => clock,
+      fetchImpl: async (url) => {
+        if (url.startsWith('https://geocoding-api.open-meteo.com')) {
+          return new Response(
+            JSON.stringify({
+              results: [{ name: 'Delhi', admin1: 'Delhi', country_code: 'IN', latitude: 28.6139, longitude: 77.209 }]
+            })
+          );
+        }
+        if (url.startsWith('https://air-quality-api.open-meteo.com')) {
+          return new Response(JSON.stringify(aqGapPayload));
+        }
+        if (url.startsWith('https://api.open-meteo.com')) {
+          return new Response(JSON.stringify(makeOpenMeteoWxPayload()));
+        }
+        return new Response('{}', { status: 404 });
+      }
+    });
+
+    const poisonedAttempt = await svc.getAirQuality({ lat: 28.61, lon: 77.21, city: 'FakeCity' });
+    assert.equal(poisonedAttempt.location.city, 'FakeCity');
+    assert.equal(poisonedAttempt.hourly24h[0].pm25, 100);
+    assert.equal(poisonedAttempt.hourly24h[1].pm25, 120);
+    assert.equal(poisonedAttempt.hourly24h[2].pm25, 140);
+    assert.equal(poisonedAttempt.hourly24h[3].pm25, 160);
+
+    const cleanDelhi = await svc.getAirQuality({ city: 'Delhi' });
+    assert.equal(cleanDelhi.location.city, 'Delhi');
+
+    // All-null Open-Meteo pm2_5 series must fail Tier 0 and trigger fallback-preset
+    const allNullAq = makeOpenMeteoAqPayload();
+    allNullAq.hourly.pm2_5 = allNullAq.hourly.pm2_5.map(() => null);
+    const allNullSvc = createAirQualityService({
+      now: () => clock,
+      fetchImpl: async (url) => {
+        if (url.startsWith('https://air-quality-api.open-meteo.com')) {
+          return new Response(JSON.stringify(allNullAq));
+        }
+        return new Response(JSON.stringify(makeOpenMeteoWxPayload()));
+      }
+    });
+    const degraded = await allNullSvc.getAirQuality({ lat: 28.61, lon: 77.21 });
+    assert.equal(degraded.stale, true);
+    assert.equal(degraded.sourceTier, 'fallback-preset');
   });
 
   it('does not stall Tier 0 when optional Tier 1/2 providers hang past 2s cutoff', async () => {
@@ -361,6 +426,7 @@ describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safe
             assert.equal(params.store, false);
             assert.equal(params.response_format.mime_type, 'application/json');
             assert.ok(opts.signal instanceof AbortSignal);
+            assert.deepEqual(opts.retries, { strategy: 'none' });
             return { output_text: JSON.stringify(nextOutput) };
           }
         }
@@ -470,5 +536,90 @@ describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safe
     });
     assert.equal(okChat.source, 'gemini');
     assert.match(okChat.reply, /13:00-15:00 IST/);
+  });
+
+  it('distinguishes coalescing keys on roomVolumeM3/profile/history and blocks double-negative safety bypasses', async () => {
+    const { snapshot } = buildTestContext();
+    let sdkCalls = 0;
+    let nextReply = { reply: 'OK', safetyNotice: '' };
+
+    const svc = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key' },
+      clientFactory: () => ({
+        interactions: {
+          create: async (_params, opts) => {
+            sdkCalls += 1;
+            assert.deepEqual(opts.retries, { strategy: 'none' });
+            await new Promise((r) => setTimeout(r, 15));
+            return { output_text: JSON.stringify(nextReply) };
+          }
+        }
+      })
+    });
+
+    const impactSmall = calculateHouseholdImpact({ outdoorPm25: snapshot.current.pm25, profile: 'infant', roomVolumeM3: 30 });
+    const impactLarge = calculateHouseholdImpact({ outdoorPm25: snapshot.current.pm25, profile: 'commuter', roomVolumeM3: 120 });
+    const planSmall = generateDeterministicPlan({ snapshot, impact: impactSmall, profiles: ['infant', 'commuter'], profile: 'infant', lang: 'en' });
+    const planLarge = generateDeterministicPlan({ snapshot, impact: impactLarge, profiles: ['infant', 'commuter'], profile: 'commuter', lang: 'en' });
+
+    nextReply = {
+      headlinePlainEnglish: 'Delhi NAQI Severe: keep rooms sealed and filtered.',
+      threeAnchorRoutine: [
+        { id: 'morning_shield', conflictNote: 'Hold commute brief.', actions: ['Keep infants indoors.'] },
+        { id: 'midday_flush', conflictNote: 'Short midday flush.', actions: ['Flush 15 min.'] },
+        { id: 'evening_lockdown', conflictNote: 'Seal before dusk.', actions: ['Run CR box.'] }
+      ],
+      profileGuidance: [{ profileId: 'infant', priorityAction: 'Use bedroom filtration.' }],
+      whatsappBrief: 'RWA Brief: NAQI Severe.'
+    };
+
+    const [pA, pB] = await Promise.all([
+      svc.enhancePlan({
+        snapshot,
+        impact: impactSmall,
+        baselinePlan: planSmall,
+        validated: { lang: 'en', profile: 'infant', profiles: ['infant', 'commuter'], maskType: 'n95', purifierMode: 'diy_cr_box', roomVolumeM3: 30, communityActions: [] }
+      }),
+      svc.enhancePlan({
+        snapshot,
+        impact: impactLarge,
+        baselinePlan: planLarge,
+        validated: { lang: 'en', profile: 'commuter', profiles: ['infant', 'commuter'], maskType: 'n95', purifierMode: 'diy_cr_box', roomVolumeM3: 120, communityActions: [] }
+      })
+    ]);
+    assert.equal(sdkCalls, 2);
+    assert.equal(pA.impact.profile, 'infant');
+    assert.equal(pB.impact.profile, 'commuter');
+
+    // Distinct chat history turns must NOT coalesce together
+    nextReply = { reply: 'शिशु को कभी मास्क न पहनाएं, बंद कमरे में फ़िल्टर चलाएं।', safetyNotice: '' };
+    const [cA, cB] = await Promise.all([
+      svc.answerChat({ message: 'What now?', history: [{ role: 'user', text: 'First turn' }], lang: 'hi', snapshot, impact: impactSmall }),
+      svc.answerChat({ message: 'What now?', history: [{ role: 'user', text: 'Different turn' }], lang: 'hi', snapshot, impact: impactSmall })
+    ]);
+    assert.equal(sdkCalls, 4);
+    assert.equal(cA.source, 'gemini');
+    assert.equal(cB.source, 'gemini');
+    assert.equal(cA.safetyNotice, undefined);
+
+    // Double-negative safety bypass attempts must be rejected to fallback
+    const unsafePhrases = [
+      'Do not hesitate to put an N95 mask on your infant',
+      'No problem washing your N95 with soap and water',
+      "Don't skip running an ozone ionizer in the bedroom",
+      'Go jogging outside today for fresh air'
+    ];
+    for (const phrase of unsafePhrases) {
+      nextReply = { reply: phrase };
+      const res = await svc.answerChat({
+        message: 'Advice please',
+        history: [],
+        lang: 'en',
+        snapshot,
+        impact: impactSmall
+      });
+      assert.equal(res.source, 'fallback', `Expected rejection for: ${phrase}`);
+      assert.equal(res.fallbackReason, 'safety_or_schema_rejected');
+    }
   });
 });
