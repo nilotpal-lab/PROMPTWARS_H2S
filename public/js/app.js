@@ -1,7 +1,7 @@
 /**
- * @fileoverview VayuMitra frontend orchestration: 0ms deterministic simulator updates,
- * AbortController API sync, APG roving-tabindex tabs, native <dialog> copilot,
- * bilingual i18n toggle, .ics download, and WhatsApp brief copy.
+ * @fileoverview VayuMitra frontend orchestration: 0ms deterministic boot + async /api/plan sync,
+ * section-scoped rendering, GPS geolocation, accessible form validation, AbortController API sync,
+ * APG roving-tabindex tabs, native <dialog> copilot, bilingual i18n toggle, .ics download, and WhatsApp brief copy.
  */
 
 import { applyStaticI18n, formatNumber, getStrings, syncProfileSelectOptions } from './i18n.js';
@@ -19,6 +19,7 @@ import { fetchActionPlan, fetchAqiSnapshot, isAbortError, postChatMessage } from
 import {
   buildIcsContent,
   collectDomRefs,
+  generateDeterministicPlan,
   renderCopilotPanel,
   renderLocationAndTelemetry,
   renderPlanSections,
@@ -118,6 +119,30 @@ function updateSelectedCheckboxStyles(doc) {
   }
 }
 
+function setFieldInvalid(inputEl, describedById, errorEl, msg) {
+  if (inputEl) {
+    inputEl.setAttribute('aria-invalid', 'true');
+    if (describedById) {
+      inputEl.setAttribute('aria-describedby', describedById);
+    }
+  }
+  if (errorEl) {
+    errorEl.textContent = msg;
+    errorEl.hidden = false;
+  }
+}
+
+function clearFieldInvalid(inputEl, errorEl) {
+  if (inputEl) {
+    inputEl.removeAttribute('aria-invalid');
+    inputEl.removeAttribute('aria-describedby');
+  }
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.hidden = true;
+  }
+}
+
 function readNumField(doc, id, min, max) {
   const raw = doc.getElementById(id)?.value;
   if (raw === undefined || String(raw).trim() === '') {
@@ -128,6 +153,23 @@ function readNumField(doc, id, min, max) {
     return undefined;
   }
   return Math.min(max, Math.max(min, num));
+}
+
+function readValidatedNumericInput(doc, inputId, errorId, options) {
+  const inputEl = doc.getElementById(inputId);
+  const errorEl = doc.getElementById(errorId);
+  const rawStr = inputEl ? String(inputEl.value).trim() : '';
+  if (rawStr === '') {
+    clearFieldInvalid(inputEl, errorEl);
+    return options.emptyValue;
+  }
+  const num = Number(rawStr);
+  if (!Number.isFinite(num) || num < options.min || num > options.max) {
+    setFieldInvalid(inputEl, errorId, errorEl, options.errorMessage);
+    return options.invalidFallback;
+  }
+  clearFieldInvalid(inputEl, errorEl);
+  return num;
 }
 
 function readDomToggles(doc) {
@@ -152,9 +194,25 @@ function readProfileSelection(doc) {
   return { profile, profiles };
 }
 
-function readHouseholdFromDom(doc, currentHousehold) {
+function readHouseholdFromDom(doc, currentHousehold, lang) {
+  const dict = getStrings(lang);
   const { profile, profiles } = readProfileSelection(doc);
   const communityActions = Array.from(doc.querySelectorAll('input[name="communityActions"]:checked')).map((el) => el.value);
+
+  const dailyKm = readValidatedNumericInput(doc, 'daily-km-input', 'daily-km-error', {
+    min: 0,
+    max: 200,
+    emptyValue: 0,
+    invalidFallback: 0,
+    errorMessage: String(dict.invalidDailyKmError)
+  });
+  const commuteDaysPerWeek = readValidatedNumericInput(doc, 'commute-days-input', 'commute-days-error', {
+    min: 1,
+    max: 7,
+    emptyValue: 5,
+    invalidFallback: 5,
+    errorMessage: String(dict.invalidCommuteDaysError)
+  });
 
   return {
     ...currentHousehold,
@@ -166,8 +224,8 @@ function readHouseholdFromDom(doc, currentHousehold) {
     outdoorHours: readNumField(doc, 'outdoor-hours-range', 0, 16) ?? PROFILE_PARAMS[profile].defaultOutdoorHours,
     commuteFrom: readSelectVal(doc, 'commute-from-select', 'petrol_car'),
     commuteTo: readSelectVal(doc, 'commute-to-select', 'metro_bus'),
-    dailyKm: readNumField(doc, 'daily-km-input', 0, 200),
-    commuteDaysPerWeek: readNumField(doc, 'commute-days-input', 1, 7),
+    dailyKm,
+    commuteDaysPerWeek,
     communityActions,
     ...readDomToggles(doc)
   };
@@ -212,23 +270,91 @@ function triggerFileDownload(filename, content, mimeType) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function bindLocationHandlers(doc, refs, state, refreshAqiAndPlan) {
-  doc.getElementById('city-search-form')?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const cityVal = doc.getElementById('city-input')?.value.trim() || '';
-    if (!cityVal) {
+function isValidCityText(cityVal) {
+  return cityVal.length >= 2 && /[a-zA-Z\u0900-\u097F0-9]/.test(cityVal);
+}
+
+function mapGeolocationErrorMessage(geoErr, dict) {
+  if (geoErr?.code === 1) {
+    return String(dict.gpsDenied);
+  }
+  if (geoErr?.code === 3) {
+    return String(dict.gpsTimeout);
+  }
+  return String(dict.gpsUnavailable);
+}
+
+function bindGpsButton(doc, refs, state, setStatus, refreshAqiAndPlan) {
+  const gpsBtn = refs['gps-locate-btn'] || doc.getElementById('gps-locate-btn');
+  gpsBtn?.addEventListener('click', () => {
+    const dict = getStrings(state.lang);
+    const geo = window.navigator?.geolocation;
+    if (!geo || typeof geo.getCurrentPosition !== 'function') {
+      setStatus(String(dict.gpsUnsupported), true);
       return;
     }
+    gpsBtn.disabled = true;
+    setStatus(String(dict.gpsLocating), false);
+    geo.getCurrentPosition(
+      (pos) => {
+        gpsBtn.disabled = false;
+        const lat = Number(pos?.coords?.latitude);
+        const lon = Number(pos?.coords?.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          setStatus(String(dict.gpsUnavailable), true);
+          return;
+        }
+        clearFieldInvalid(refs['city-input'], null);
+        if (refs['city-input']) {
+          refs['city-input'].value = '';
+        }
+        state.query.city = '';
+        state.query.preset = '';
+        state.query.lat = Number(lat.toFixed(4));
+        state.query.lon = Number(lon.toFixed(4));
+        refreshAqiAndPlan();
+      },
+      (geoErr) => {
+        gpsBtn.disabled = false;
+        setStatus(mapGeolocationErrorMessage(geoErr, getStrings(state.lang)), true);
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
+  });
+}
+
+function bindLocationHandlers(doc, refs, state, setStatus, refreshAqiAndPlan) {
+  const cityInput = refs['city-input'] || doc.getElementById('city-input');
+  const calInput = refs['calibrated-aqi-input'] || doc.getElementById('calibrated-aqi-input');
+
+  cityInput?.addEventListener('input', () => clearFieldInvalid(cityInput, null));
+  calInput?.addEventListener('input', () => clearFieldInvalid(calInput, null));
+
+  doc.getElementById('city-search-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const dict = getStrings(state.lang);
+    const cityVal = cityInput?.value.trim() || '';
+    if (!isValidCityText(cityVal)) {
+      setFieldInvalid(cityInput, 'status-banner', null, '');
+      setStatus(String(dict.invalidCityError), true);
+      cityInput?.focus();
+      return;
+    }
+    clearFieldInvalid(cityInput, null);
     state.query.city = cityVal;
     state.query.preset = '';
+    state.query.lat = null;
+    state.query.lon = null;
     refreshAqiAndPlan();
   });
 
   for (const btn of doc.querySelectorAll('[data-preset]')) {
     btn.addEventListener('click', () => {
+      clearFieldInvalid(cityInput, null);
       state.query.preset = btn.getAttribute('data-preset') || 'delhi-severe';
       state.query.city = '';
-      const cityInput = doc.getElementById('city-input');
+      state.query.lat = null;
+      state.query.lon = null;
       if (cityInput) {
         cityInput.value = '';
       }
@@ -238,10 +364,16 @@ function bindLocationHandlers(doc, refs, state, refreshAqiAndPlan) {
 
   doc.getElementById('calibration-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const raw = Number(refs['calibrated-aqi-input']?.value);
-    if (!Number.isFinite(raw) || raw < 1 || raw > 999) {
+    const dict = getStrings(state.lang);
+    const rawStr = calInput?.value.trim() || '';
+    const raw = Number(rawStr);
+    if (!rawStr || !Number.isFinite(raw) || raw < 1 || raw > 999) {
+      setFieldInvalid(calInput, 'status-banner', null, '');
+      setStatus(String(dict.invalidCalibrationError), true);
+      calInput?.focus();
       return;
     }
+    clearFieldInvalid(calInput, null);
     state.query.calibratedAqi = Math.round(raw);
     if (refs['clear-calibration-btn']) {
       refs['clear-calibration-btn'].hidden = false;
@@ -250,13 +382,18 @@ function bindLocationHandlers(doc, refs, state, refreshAqiAndPlan) {
   });
 
   refs['clear-calibration-btn']?.addEventListener('click', () => {
+    clearFieldInvalid(calInput, null);
     state.query.calibratedAqi = null;
-    if (refs['calibrated-aqi-input']) {
-      refs['calibrated-aqi-input'].value = '';
+    if (calInput) {
+      calInput.value = '';
     }
-    refs['clear-calibration-btn'].hidden = true;
+    if (refs['clear-calibration-btn']) {
+      refs['clear-calibration-btn'].hidden = true;
+    }
     refreshAqiAndPlan();
   });
+
+  bindGpsButton(doc, refs, state, setStatus, refreshAqiAndPlan);
 }
 
 function bindCopilotDialog(doc, refs, sendChatPrompt) {
@@ -398,35 +535,51 @@ function bindSimulatorEvents(doc, handler) {
   });
 }
 
-function clearTransientNotices(refs, state) {
+function clearTransientNotices(refs, state, setStatus) {
   if (refs['copy-status']) {
     refs['copy-status'].textContent = '';
   }
   if (refs['copilot-status']) {
     refs['copilot-status'].textContent = '';
   }
-  if (refs['status-banner'] && state.snapshot?.stale) {
-    refs['status-banner'].textContent = String(getStrings(state.lang).staleNotice);
-  } else if (refs['status-banner']) {
-    refs['status-banner'].textContent = '';
+  if (state.snapshot?.stale) {
+    setStatus(String(getStrings(state.lang).staleNotice), false);
+  } else {
+    setStatus('', false);
   }
+}
+
+function buildDeterministicPlanForState(state) {
+  return generateDeterministicPlan({
+    snapshot: state.snapshot,
+    impact: state.impact,
+    ...state.household,
+    lang: state.lang
+  });
 }
 
 /**
  * Initialize VayuMitra application controllers and listeners on the provided Document.
  * @param {Document} [doc]
- * @returns {{ state: Record<string, unknown>, refreshAll: () => Promise<void> }}
+ * @returns {{ state: Record<string, unknown>, refreshAll: () => Promise<void>, syncPlan: () => Promise<void>, destroy: () => void }}
  */
 export function initApp(doc = document) {
   const state = createInitialState();
+  state.plan = buildDeterministicPlanForState(state);
   const refs = collectDomRefs(doc);
+  let lastValidQuery = { ...state.query };
   let planDebounceTimer = null;
   let liveAnnounceTimer = null;
+  let destroyed = false;
 
-  const setStatus = (msg) => {
-    if (refs['status-banner']) {
-      refs['status-banner'].textContent = msg;
+  const setStatus = (msg, isError = false) => {
+    const banner = refs['status-banner'];
+    if (!banner) {
+      return;
     }
+    banner.textContent = msg;
+    banner.setAttribute('role', isError ? 'alert' : 'status');
+    banner.classList.toggle('status-error', Boolean(isError && msg));
   };
 
   const toggleChecklist = (anchorId, checked) => {
@@ -434,56 +587,93 @@ export function initApp(doc = document) {
     saveChecklist(getTodayIstKey(), state.checklist);
   };
 
-  const renderEverything = () => {
-    applyStaticI18n(doc, state.lang);
-    syncProfileSelectOptions(doc, state.household.profiles, state.household.profile, state.lang);
-    syncPressedButtons(doc, '.lang-btn', 'data-lang', state.lang);
-    syncPressedButtons(doc, '[data-preset]', 'data-preset', state.query.city ? '' : state.query.preset);
-    updateSelectedCheckboxStyles(doc);
+  const renderTelemetrySection = () => {
+    const activePreset = state.query.city || Number.isFinite(state.query.lat) ? '' : state.query.preset;
+    syncPressedButtons(doc, '[data-preset]', 'data-preset', activePreset);
     renderLocationAndTelemetry(refs, state.snapshot, state.lang);
+  };
+
+  const renderSimulatorSection = () => {
+    syncProfileSelectOptions(doc, state.household.profiles, state.household.profile, state.lang);
+    updateSelectedCheckboxStyles(doc);
     renderSimulatorReadout(refs, state.impact, state.household, state.snapshot, state.lang);
+  };
+
+  const renderPlanSection = () => {
     renderPlanSections(refs, state, toggleChecklist);
+  };
+
+  const renderCopilotSection = () => {
     renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
   };
 
+  const renderEverything = () => {
+    applyStaticI18n(doc, state.lang);
+    syncPressedButtons(doc, '.lang-btn', 'data-lang', state.lang);
+    renderTelemetrySection();
+    renderSimulatorSection();
+    renderPlanSection();
+    renderCopilotSection();
+  };
+
+  const applySyncPlanSuccess = (res, dict) => {
+    if (res?.plan) {
+      state.plan = res.plan;
+      state.planSource = res.source === 'gemini' ? 'gemini' : 'fallback';
+    }
+    if (state.planSource !== 'error-fallback' && refs['status-banner']?.classList.contains('status-error')) {
+      setStatus(state.snapshot?.stale ? String(dict.staleNotice) : '', false);
+    }
+    renderPlanSection();
+  };
+
   const syncServerPlan = async () => {
+    const dict = getStrings(state.lang);
     try {
       const res = await fetchActionPlan(buildPlanRequestPayload(state));
-      state.snapshot = res?.snapshot || state.snapshot;
-      state.impact = res?.impact || state.impact;
-      if (res?.plan) {
-        state.plan = res.plan;
-        state.planSource = res.source === 'gemini' ? 'gemini' : 'fallback';
+      if (!destroyed) {
+        applySyncPlanSuccess(res, dict);
       }
-      renderEverything();
     } catch (err) {
-      if (!isAbortError(err)) {
-        state.plan = null;
-        state.planSource = 'fallback';
-        renderEverything();
+      if (!destroyed && !isAbortError(err)) {
+        state.plan = buildDeterministicPlanForState(state);
+        state.planSource = 'error-fallback';
+        setStatus(`${dict.planFallbackError}${err.message}`, true);
+        renderPlanSection();
       }
     }
   };
 
   const refreshAqiAndPlan = async () => {
     const dict = getStrings(state.lang);
-    state.plan = null;
-    state.planSource = 'fallback';
-    setStatus(String(dict.loadingStatus));
+    setStatus(String(dict.loadingStatus), false);
     try {
       const snap = await fetchAqiSnapshot({ ...state.query, lang: state.lang });
       if (snap?.current) {
+        lastValidQuery = { ...state.query };
         state.snapshot = snap;
         state.impact = computeImpactMirror(snap.current.pm25, state.household);
+        state.plan = buildDeterministicPlanForState(state);
+        state.planSource = 'fallback';
       }
-      setStatus(snap?.stale ? String(dict.staleNotice) : '');
-      renderEverything();
+      clearFieldInvalid(refs['city-input'], null);
+      setStatus(snap?.stale ? String(dict.staleNotice) : '', false);
+      renderTelemetrySection();
+      renderSimulatorSection();
+      renderPlanSection();
+      renderCopilotSection();
       await syncServerPlan();
     } catch (err) {
-      if (!isAbortError(err)) {
-        setStatus(`${dict.errorPrefix}${err.message}`);
-        renderEverything();
+      if (isAbortError(err)) {
+        return;
       }
+      if (err.status === 404 || err.code === 'CITY_NOT_FOUND') {
+        state.query = { ...lastValidQuery };
+        setFieldInvalid(refs['city-input'], 'status-banner', null, '');
+        setStatus(String(dict.cityNotFoundError), true);
+        return;
+      }
+      setStatus(`${dict.errorPrefix}${err.message}`, true);
     }
   };
 
@@ -507,23 +697,24 @@ export function initApp(doc = document) {
         safetyNotice: data.safetyNotice
       });
       setCopilotLoading(refs, false, state.lang);
-      renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
+      renderCopilotSection();
     } catch (err) {
       setCopilotLoading(refs, false, state.lang);
       if (!isAbortError(err) && refs['copilot-status']) {
         refs['copilot-status'].textContent = `${getStrings(state.lang).errorPrefix}${err.message}`;
       }
-      renderCopilotPanel(refs, state.chatHistory, state.snapshot, state.lang, sendChatPrompt);
+      renderCopilotSection();
     }
   }
 
   const onSimulatorChange = (event) => {
     syncProfileOutdoorHours(doc, event.target, state.lang);
-    state.household = readHouseholdFromDom(doc, state.household);
+    state.household = readHouseholdFromDom(doc, state.household, state.lang);
     state.impact = computeImpactMirror(state.snapshot.current?.pm25 ?? 180, state.household);
-    updateSelectedCheckboxStyles(doc);
-    renderSimulatorReadout(refs, state.impact, state.household, state.snapshot, state.lang);
-    renderPlanSections(refs, state, toggleChecklist);
+    state.plan = buildDeterministicPlanForState(state);
+    state.planSource = 'fallback';
+    renderSimulatorSection();
+    renderPlanSection();
 
     window.clearTimeout(liveAnnounceTimer);
     liveAnnounceTimer = window.setTimeout(() => {
@@ -543,28 +734,29 @@ export function initApp(doc = document) {
     state.activeTab = tabId;
   });
   bindSimulatorEvents(doc, onSimulatorChange);
-  bindLocationHandlers(doc, refs, state, refreshAqiAndPlan);
+  bindLocationHandlers(doc, refs, state, setStatus, refreshAqiAndPlan);
   bindCopilotDialog(doc, refs, sendChatPrompt);
   bindUtilityActions(doc, refs, state, (nextLang) => {
     state.lang = nextLang;
     saveLang(nextLang);
-    clearTransientNotices(refs, state);
+    clearTransientNotices(refs, state, setStatus);
     renderEverything();
     syncServerPlan();
   });
 
   renderEverything();
   const destroy = () => {
+    destroyed = true;
     window.clearTimeout(planDebounceTimer);
     window.clearTimeout(liveAnnounceTimer);
   };
-  return { state, refreshAll: refreshAqiAndPlan, destroy };
+  return { state, refreshAll: refreshAqiAndPlan, syncPlan: syncServerPlan, destroy };
 }
 
 if (typeof window !== 'undefined' && !window.__VAYUMITRA_MANUAL_INIT__) {
   const start = () => {
     const app = initApp(document);
-    app.refreshAll();
+    app.syncPlan();
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import axe from 'axe-core';
-import { buildAirQualitySnapshot } from '../lib/aqi.js';
+import { buildAirQualitySnapshot, classifyNaqi, computeNaqi } from '../lib/aqi.js';
 import { calculateHouseholdImpact } from '../lib/impact.js';
 
 const PUBLIC_DIR = path.resolve('public');
@@ -53,11 +53,13 @@ function assertCleanElementAttrs(doc) {
 }
 
 describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+', () => {
-  it('contains zero unsafe DOM sinks, evals, inline scripts, or inline style attributes', async () => {
+  it('contains zero unsafe DOM sinks, evals, inline scripts, or inline style attributes and enforces 44px .lang-btn', async () => {
     const html = await fs.readFile(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+    const css = await fs.readFile(path.join(PUBLIC_DIR, 'styles.css'), 'utf8');
     assert.equal(/<style\b/i.test(html), false, 'Inline <style> block found in HTML');
     assert.equal(/user-scalable\s*=\s*no|maximum-scale\s*=\s*1/i.test(html), false, 'Zoom-blocking viewport found');
     assert.match(html, /viewport-fit=cover/);
+    assert.match(css, /\.lang-btn\s*\{[^}]*min-height:\s*44px;/s);
 
     const dom = new JSDOM(html);
     assertCleanElementAttrs(dom.window.document);
@@ -79,8 +81,13 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
     }
   });
 
-  it('matches lib/impact.js dosimetry and lib/aqi.js NAQI in client 0ms state mirror', async () => {
-    const { computeImpactMirror, createInitialState } = await import('../public/js/state.js');
+  it('matches lib/impact.js dosimetry and lib/aqi.js NAQI 100% in public/js/state.js', async () => {
+    const {
+      classifyNaqi: clientClassifyNaqi,
+      computeImpactMirror,
+      computeNaqi: clientComputeNaqi,
+      createInitialState
+    } = await import('../public/js/state.js');
     const scenarios = [
       { pm25: 0, profile: 'commuter', maskType: 'n95', purifierMode: 'diy_cr_box', roomVolumeM3: 40, outdoorHours: 0, noExhaustTadka: false, indoorIncenseOrCoil: false, dryJhaduSweeping: false, sealed24hNoFlush: false, commuteFrom: 'petrol_car', commuteTo: 'wfh', dailyKm: 0, commuteDaysPerWeek: 5, communityActions: [] },
       { pm25: 220, profile: 'commuter', maskType: 'n95', purifierMode: 'diy_cr_box', roomVolumeM3: 40, outdoorHours: 2.5, noExhaustTadka: true, indoorIncenseOrCoil: false, dryJhaduSweeping: false, sealed24hNoFlush: false, commuteFrom: 'petrol_car', commuteTo: 'metro_bus', dailyKm: 20, commuteDaysPerWeek: 5, communityActions: ['compost_leaves'] },
@@ -90,19 +97,23 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
     for (const cfg of scenarios) {
       const serverImpact = calculateHouseholdImpact({ ...cfg, outdoorPm25: cfg.pm25 });
       const clientImpact = computeImpactMirror(cfg.pm25, cfg);
-      assert.deepEqual(clientImpact.dose, serverImpact.dose);
-      assert.deepEqual(clientImpact.indoorBox, serverImpact.indoorBox);
-      assert.equal(clientImpact.adultCigaretteEquivalent, serverImpact.adultCigaretteEquivalent);
-      assert.equal(clientImpact.co2eSavedKgPerWeek, serverImpact.co2eSavedKgPerWeek);
-      assert.equal(clientImpact.pm25AvoidedGPerWeek, serverImpact.pm25AvoidedGPerWeek);
+      assert.deepEqual(clientImpact, serverImpact);
     }
+
+    assert.deepEqual(
+      clientComputeNaqi({ pm25: 185, coUgM3: 800 }),
+      computeNaqi({ pm25: 185, coUgM3: 800 })
+    );
+    assert.deepEqual(clientClassifyNaqi(462), classifyNaqi(462));
 
     const dom = await loadFrontendDom();
     await withDomGlobals(dom, async () => {
       const seeded = createInitialState().snapshot;
       const domainDelhi = buildAirQualitySnapshot({ presetId: 'delhi-severe' });
+      assert.equal(seeded.current.istHour, domainDelhi.current.istHour);
       assert.equal(seeded.current.naqi, domainDelhi.current.naqi);
       assert.equal(seeded.current.category, domainDelhi.current.category);
+      assert.deepEqual(seeded.hourly24h, domainDelhi.hourly24h);
     });
   });
 
@@ -120,7 +131,7 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
     }
   });
 
-  it('aligns rotated 24h SVG chart bands inside viewBox and avoids dose legend overlap / zero-division', async () => {
+  it('aligns rotated 24h SVG chart bands inside 560x290 viewBox and stacks 520x168 dose legend cleanly', async () => {
     const dom = await loadFrontendDom();
     await withDomGlobals(dom, async () => {
       const { renderDoseBarSvg, renderPm25Chart } = await import('../public/js/charts.js');
@@ -138,20 +149,164 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
         hourly24h: rotatedHourly
       }, 'en');
 
+      assert.equal(chartSvg.getAttribute('viewBox'), '0 0 560 290');
       const tickTexts = Array.from(chartSvg.querySelectorAll('text')).map((n) => n.textContent);
       assert.ok(tickTexts.includes('18:00'));
       for (const rect of chartSvg.querySelectorAll('rect')) {
         const x = Number(rect.getAttribute('x'));
         const w = Number(rect.getAttribute('width'));
-        assert.ok(x >= 0 && x + w <= 720, `Band rect overflowed viewBox: x=${x}, w=${w}`);
+        assert.ok(x >= 0 && x + w <= 560, `Band rect overflowed viewBox: x=${x}, w=${w}`);
       }
 
       const doseSvg = doc.getElementById('dose-bar-svg');
       renderDoseBarSvg(doseSvg, { dose: { commuteOutdoor: 0, cookingIndoor: 0, baselineIndoor: 0, totalMitigatedUg: 0 } }, 'en');
+      assert.equal(doseSvg.getAttribute('viewBox'), '0 0 520 168');
       const legendTexts = Array.from(doseSvg.querySelectorAll('text'));
       assert.equal(legendTexts.length, 3);
       const yPositions = legendTexts.map((t) => Number(t.getAttribute('y')));
       assert.equal(new Set(yPositions).size, 3, 'Dose legend rows must stack on distinct Y coordinates');
+    });
+  });
+
+  it('supports GPS geolocation, form aria-invalid validation, 404 city retention, empty dailyKm=0, tomorrowWindow, slider aria-valuetext, incremental copilot & focus preservation', async () => {
+    const dom = await loadFrontendDom();
+    const prevFetch = globalThis.fetch;
+
+    await withDomGlobals(dom, async () => {
+      const { initApp } = await import('../public/js/app.js');
+      const { collectDomRefs, renderCopilotPanel } = await import('../public/js/renderers.js');
+      const doc = dom.window.document;
+      const fetchedUrls = [];
+
+      globalThis.fetch = async (url, opts) => {
+        fetchedUrls.push({ url: String(url), method: opts?.method || 'GET' });
+        if (String(url).includes('city=UnknownTown')) {
+          return new Response(JSON.stringify({ error: { code: 'CITY_NOT_FOUND', message: 'City not found' } }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        if (String(url).includes('/api/aqi')) {
+          const base = buildAirQualitySnapshot({ presetId: 'igp-very-poor' });
+          return new Response(JSON.stringify({
+            ...base,
+            location: { ...base.location, city: 'GPS Lucknow', lat: 26.85, lon: 80.95 },
+            tomorrowWindow: { startHour: 12, endHour: 14, label: '12:00–14:00 IST', avgPm25: 98, confidence: 'brief_only' }
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (String(url).includes('/api/plan')) {
+          return new Response(JSON.stringify({ error: { code: 'AI_DOWN', message: 'Quota exceeded' } }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      };
+
+      const app = initApp(doc);
+      try {
+        // 1. Boot does zero redundant /api/aqi calls
+        assert.equal(fetchedUrls.length, 0);
+
+        // 2. Range slider aria-valuetext updates in EN and HI
+        const roomRange = doc.getElementById('room-volume-range');
+        const hoursRange = doc.getElementById('outdoor-hours-range');
+        assert.match(roomRange.getAttribute('aria-valuetext'), /36 m³/);
+        assert.match(hoursRange.getAttribute('aria-valuetext'), /2\.5 hours per day/);
+        roomRange.value = '60';
+        roomRange.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+        assert.match(roomRange.getAttribute('aria-valuetext'), /60 m³/);
+
+        // 3. Empty #daily-km-input maps to 0 km (not 16 km), invalid shows aria-invalid
+        const dailyKmInput = doc.getElementById('daily-km-input');
+        dailyKmInput.value = '';
+        dailyKmInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+        assert.equal(app.state.household.dailyKm, 0);
+        assert.equal(dailyKmInput.hasAttribute('aria-invalid'), false);
+        dailyKmInput.value = '999';
+        dailyKmInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+        assert.equal(dailyKmInput.getAttribute('aria-invalid'), 'true');
+        assert.equal(doc.getElementById('daily-km-error').hidden, false);
+
+        // 4. Empty city and invalid calibration submit set aria-invalid + aria-describedby + alert
+        const cityInput = doc.getElementById('city-input');
+        const statusBanner = doc.getElementById('status-banner');
+        cityInput.value = '';
+        doc.getElementById('city-search-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        assert.equal(cityInput.getAttribute('aria-invalid'), 'true');
+        assert.equal(cityInput.getAttribute('aria-describedby'), 'status-banner');
+        assert.equal(statusBanner.getAttribute('role'), 'alert');
+
+        const calInput = doc.getElementById('calibrated-aqi-input');
+        calInput.value = '1500';
+        doc.getElementById('calibration-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        assert.equal(calInput.getAttribute('aria-invalid'), 'true');
+        assert.equal(calInput.getAttribute('aria-describedby'), 'status-banner');
+
+        // 5. #gps-locate-btn existence & geolocation -> GET /api/aqi?lat=...&lon=... + tomorrowWindow rendering
+        const gpsBtn = doc.getElementById('gps-locate-btn');
+        assert.ok(gpsBtn, '#gps-locate-btn must exist');
+        Object.defineProperty(dom.window.navigator, 'geolocation', {
+          configurable: true,
+          value: {
+            getCurrentPosition: (ok) => ok({ coords: { latitude: 26.8467, longitude: 80.9462 } })
+          }
+        });
+        gpsBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.ok(fetchedUrls.some((u) => u.url.includes('/api/aqi?') && u.url.includes('lat=26.8467') && u.url.includes('lon=80.9462')));
+        assert.equal(doc.getElementById('hero-location-city').textContent, 'GPS Lucknow');
+        assert.equal(doc.getElementById('tomorrow-window-row').hidden, false);
+        assert.match(doc.getElementById('tomorrow-window-label').textContent, /12:00–14:00 IST/);
+
+        // 6. Non-silent /api/plan failure surfaced in #plan-source-badge and #status-banner
+        assert.match(doc.getElementById('plan-source-badge').textContent, /Offline Fallback/i);
+        assert.match(statusBanner.textContent, /Quota exceeded/);
+
+        // 7. 404 CITY_NOT_FOUND preserves current valid city telemetry
+        cityInput.value = 'UnknownTown';
+        doc.getElementById('city-search-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.equal(doc.getElementById('hero-location-city').textContent, 'GPS Lucknow');
+        assert.match(statusBanner.textContent, /City not found/i);
+        assert.equal(cityInput.getAttribute('aria-invalid'), 'true');
+
+        // 8. Focus preserved on #routine-anchors checkbox when syncPlan() updates plan section
+        const firstAnchorCheckbox = doc.querySelector('#routine-anchors input[type="checkbox"]');
+        firstAnchorCheckbox.focus();
+        assert.equal(doc.activeElement, firstAnchorCheckbox);
+        await app.syncPlan();
+        assert.equal(doc.activeElement, firstAnchorCheckbox);
+
+        // 9. Incremental copilot append preserves existing DOM bubble nodes
+        const refs = collectDomRefs(doc);
+        const msgBox = doc.getElementById('copilot-messages');
+        const msg1 = { role: 'user', text: 'First question' };
+        const msg2 = { role: 'assistant', text: 'First reply', meta: 'NAQI 300' };
+        renderCopilotPanel(refs, [msg1], app.state.snapshot, 'en', () => {});
+        const firstBubbleNode = msgBox.children[0];
+        renderCopilotPanel(refs, [msg1, msg2], app.state.snapshot, 'en', () => {});
+        assert.equal(msgBox.children.length, 2);
+        assert.equal(msgBox.children[0], firstBubbleNode);
+
+        // Language switch rebuilds copilot bubbles in Hindi and updates slider aria-valuetext
+        doc.getElementById('lang-hi-btn').click();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.match(hoursRange.getAttribute('aria-valuetext'), /घंटे प्रतिदिन/);
+
+        // GPS denied error displays localized Hindi status banner
+        Object.defineProperty(dom.window.navigator, 'geolocation', {
+          configurable: true,
+          value: {
+            getCurrentPosition: (_ok, errFn) => errFn({ code: 1 })
+          }
+        });
+        gpsBtn.click();
+        assert.match(statusBanner.textContent, /लोकेशन की अनुमति नहीं मिली/);
+      } finally {
+        globalThis.fetch = prevFetch;
+        app.destroy();
+      }
     });
   });
 
@@ -175,136 +330,132 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
       const { state } = app;
       const doc = dom.window.document;
       try {
+        const infantBox = doc.querySelector('input[name="profiles"][value="infant"]');
+        infantBox.checked = true;
+        infantBox.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+        const profileSelect = doc.getElementById('profile-select');
+        assert.equal(profileSelect.value, 'infant');
+        assert.equal(profileSelect.options.length, 2);
 
-      // Dynamic profile selector updates to highest-risk checked member
-      const infantBox = doc.querySelector('input[name="profiles"][value="infant"]');
-      infantBox.checked = true;
-      infantBox.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-      const profileSelect = doc.getElementById('profile-select');
-      assert.equal(profileSelect.value, 'infant');
-      assert.equal(profileSelect.options.length, 2);
+        state.snapshot.location.city = `Anand Vihar ${xssPayload}`;
+        state.snapshot.regionalContext = {
+          fireAlert: { active: true, fireCount: 42, region: 'Punjab-Haryana', messageEn: `Fire plume ${xssPayload}` }
+        };
+        state.snapshot.whatChangedToday.summaryEn = `Change summary ${xssPayload}`;
+        state.household.maskType = 'n95';
+        state.impact = computeImpactMirror(260, state.household);
+        state.planSource = 'gemini';
+        state.plan = {
+          lang: 'en',
+          headlinePlainEnglish: `Headline ${xssPayload}`,
+          medicalRedFlag: { active: true, severity: 'critical', guidance: `Red flag ${xssPayload}`, emergencySigns: [`Sign ${xssPayload}`] },
+          threeAnchorRoutine: [
+            { id: 'morning_shield', timeWindow: '06:30–09:00 IST', title: `Morning ${xssPayload}`, conflictNote: xssPayload, actions: [xssPayload] }
+          ],
+          profileGuidance: [
+            { profileId: 'infant', label: 'Infant', maskRule: `Safety rule ${xssPayload}`, outdoorRule: xssPayload, priorityAction: xssPayload }
+          ],
+          iaqHacks: { zero_cost: [{ title: xssPayload, detail: xssPayload }], diy: [], purifier: [] },
+          mythBusters: [{ myth: xssPayload, reality: xssPayload }],
+          commuteAndCommunity: { whatsappBrief: `RWA Brief ${xssPayload}` }
+        };
 
-      state.snapshot.location.city = `Anand Vihar ${xssPayload}`;
-      state.snapshot.regionalContext = {
-        fireAlert: { active: true, fireCount: 42, region: 'Punjab-Haryana', messageEn: `Fire plume ${xssPayload}` }
-      };
-      state.snapshot.whatChangedToday.summaryEn = `Change summary ${xssPayload}`;
-      state.household.maskType = 'n95';
-      state.impact = computeImpactMirror(260, state.household);
-      state.planSource = 'gemini';
-      state.plan = {
-        lang: 'en',
-        headlinePlainEnglish: `Headline ${xssPayload}`,
-        medicalRedFlag: { active: true, severity: 'critical', guidance: `Red flag ${xssPayload}`, emergencySigns: [`Sign ${xssPayload}`] },
-        threeAnchorRoutine: [
-          { id: 'morning_shield', timeWindow: '06:30–09:00 IST', title: `Morning ${xssPayload}`, conflictNote: xssPayload, actions: [xssPayload] }
-        ],
-        profileGuidance: [
-          { profileId: 'infant', label: 'Infant', maskRule: `Safety rule ${xssPayload}`, outdoorRule: xssPayload, priorityAction: xssPayload }
-        ],
-        iaqHacks: { zero_cost: [{ title: xssPayload, detail: xssPayload }], diy: [], purifier: [] },
-        mythBusters: [{ myth: xssPayload, reality: xssPayload }],
-        commuteAndCommunity: { whatsappBrief: `RWA Brief ${xssPayload}` }
-      };
+        const refs = collectDomRefs(doc);
+        renderLocationAndTelemetry(refs, state.snapshot, 'en');
+        renderSimulatorReadout(refs, state.impact, state.household, state.snapshot, 'en');
+        renderPlanSections(refs, state, () => {});
+        renderCopilotPanel(
+          refs,
+          [{ role: 'assistant', text: `Reply ${xssPayload}`, meta: 'NAQI 420', safetyNotice: `Medical notice ${xssPayload}` }],
+          state.snapshot,
+          'en',
+          () => {}
+        );
 
-      const refs = collectDomRefs(doc);
-      renderLocationAndTelemetry(refs, state.snapshot, 'en');
-      renderSimulatorReadout(refs, state.impact, state.household, state.snapshot, 'en');
-      renderPlanSections(refs, state, () => {});
-      renderCopilotPanel(
-        refs,
-        [{ role: 'assistant', text: `Reply ${xssPayload}`, meta: 'NAQI 420', safetyNotice: `Medical notice ${xssPayload}` }],
-        state.snapshot,
-        'en',
-        () => {}
-      );
+        assert.equal(state.impact.mask.blockedForInfant, true);
+        assert.equal(state.impact.mask.efficiency, 0);
+        assert.equal(refs['infant-mask-warning'].hidden, false);
+        assert.equal(refs['medical-red-flag-banner'].classList.contains('alert-critical'), true);
+        assert.equal(dom.window.__xssFired, undefined);
+        assert.equal(doc.querySelectorAll('img[src="x"]').length, 0);
+        assert.ok(refs['hero-location-city'].textContent.includes('<img src=x onerror=alert(1)>'));
+        assert.ok(doc.querySelector('.chat-safety-notice')?.textContent.includes('Medical notice'));
+        assert.match(doc.getElementById('math-details-body').textContent, /Open-Meteo CAMS/i);
+        assert.equal(doc.querySelectorAll('#inversion-diagram-callouts li').length, 3);
+        assert.equal(doc.querySelectorAll('#diy-diagram-callouts li').length, 3);
+        assertCleanElementAttrs(doc);
 
-      assert.equal(state.impact.mask.blockedForInfant, true);
-      assert.equal(state.impact.mask.efficiency, 0);
-      assert.equal(refs['infant-mask-warning'].hidden, false);
-      assert.equal(refs['medical-red-flag-banner'].classList.contains('alert-critical'), true);
-      assert.equal(dom.window.__xssFired, undefined);
-      assert.equal(doc.querySelectorAll('img[src="x"]').length, 0);
-      assert.ok(refs['hero-location-city'].textContent.includes('<img src=x onerror=alert(1)>'));
-      assert.ok(doc.querySelector('.chat-safety-notice')?.textContent.includes('Medical notice'));
-      assertCleanElementAttrs(doc);
+        const toggleBtn = doc.getElementById('toggle-table-btn');
+        const tableWrap = doc.getElementById('pm25-table-wrap');
+        assert.equal(toggleBtn.getAttribute('aria-expanded'), 'false');
+        toggleBtn.click();
+        assert.equal(toggleBtn.getAttribute('aria-expanded'), 'true');
+        assert.equal(tableWrap.hidden, false);
+        assert.equal(toggleBtn.getAttribute('data-i18n'), 'hideTableBtn');
 
-      // Verify 24h table toggle & EN <-> HI label preservation
-      const toggleBtn = doc.getElementById('toggle-table-btn');
-      const tableWrap = doc.getElementById('pm25-table-wrap');
-      assert.equal(toggleBtn.getAttribute('aria-expanded'), 'false');
-      toggleBtn.click();
-      assert.equal(toggleBtn.getAttribute('aria-expanded'), 'true');
-      assert.equal(tableWrap.hidden, false);
-      assert.equal(toggleBtn.getAttribute('data-i18n'), 'hideTableBtn');
+        const tabRoutine = doc.getElementById('tab-routine');
+        const tabIaq = doc.getElementById('tab-iaq');
+        const tabImpact = doc.getElementById('tab-impact');
+        tabRoutine.focus();
+        tabRoutine.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        assert.equal(tabIaq.getAttribute('aria-selected'), 'true');
+        assert.equal(tabIaq.getAttribute('tabindex'), '0');
+        assert.equal(doc.getElementById('panel-iaq').hidden, false);
 
-      // Verify APG roving-tabindex keyboard navigation
-      const tabRoutine = doc.getElementById('tab-routine');
-      const tabIaq = doc.getElementById('tab-iaq');
-      const tabImpact = doc.getElementById('tab-impact');
-      tabRoutine.focus();
-      tabRoutine.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-      assert.equal(tabIaq.getAttribute('aria-selected'), 'true');
-      assert.equal(tabIaq.getAttribute('tabindex'), '0');
-      assert.equal(doc.getElementById('panel-iaq').hidden, false);
+        tabIaq.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+        assert.equal(tabImpact.getAttribute('aria-selected'), 'true');
+        tabImpact.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+        assert.equal(tabRoutine.getAttribute('aria-selected'), 'true');
 
-      tabIaq.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-      assert.equal(tabImpact.getAttribute('aria-selected'), 'true');
-      tabImpact.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-      assert.equal(tabRoutine.getAttribute('aria-selected'), 'true');
+        const openBtn = doc.getElementById('open-copilot-btn');
+        const dialog = doc.getElementById('copilot-dialog');
+        openBtn.focus();
+        openBtn.click();
+        assert.equal(dialog.hasAttribute('open'), true);
+        dialog.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        assert.equal(dialog.hasAttribute('open'), false);
+        assert.equal(doc.activeElement, openBtn);
 
-      // Verify <dialog> open, Escape close & focus restoration
-      const openBtn = doc.getElementById('open-copilot-btn');
-      const dialog = doc.getElementById('copilot-dialog');
-      openBtn.focus();
-      openBtn.click();
-      assert.equal(dialog.hasAttribute('open'), true);
-      dialog.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      assert.equal(dialog.hasAttribute('open'), false);
-      assert.equal(doc.activeElement, openBtn);
+        const midnightIcs = buildIcsContent({
+          location: { city: 'Delhi' },
+          ventilationWindow: { startHour: 0, endHour: 2, label: '00:00–02:00 IST', avgPm25: 80 }
+        }, 'en');
+        assert.match(midnightIcs, /DTSTART:\d{8}T183000Z/);
+        assert.match(midnightIcs, /DTEND:\d{8}T203000Z/);
 
-      // Verify midnight hour 0 and midnight rollover in .ics export
-      const midnightIcs = buildIcsContent({
-        location: { city: 'Delhi' },
-        ventilationWindow: { startHour: 0, endHour: 2, label: '00:00–02:00 IST', avgPm25: 80 }
-      }, 'en');
-      assert.match(midnightIcs, /DTSTART:\d{8}T183000Z/);
-      assert.match(midnightIcs, /DTEND:\d{8}T203000Z/);
+        const rolloverIcs = buildIcsContent({
+          location: { city: 'Delhi' },
+          ventilationWindow: { startHour: 23, endHour: 1, label: '23:00–01:00 IST', avgPm25: 90 }
+        }, 'hi');
+        const [, dayA, dayB] = rolloverIcs.match(/DTSTART:(\d{8})T173000Z\r\nDTEND:(\d{8})T193000Z/) || [];
+        assert.ok(dayA && dayB && dayA === dayB, '23:00-01:00 IST maps to 17:30Z-19:30Z on same UTC date');
 
-      const rolloverIcs = buildIcsContent({
-        location: { city: 'Delhi' },
-        ventilationWindow: { startHour: 23, endHour: 1, label: '23:00–01:00 IST', avgPm25: 90 }
-      }, 'hi');
-      const [, dayA, dayB] = rolloverIcs.match(/DTSTART:(\d{8})T173000Z\r\nDTEND:(\d{8})T193000Z/) || [];
-      assert.ok(dayA && dayB && dayA === dayB, '23:00-01:00 IST maps to 17:30Z-19:30Z on same UTC date');
+        const spanMidnightIcs = buildIcsContent({
+          location: { city: 'Delhi' },
+          ventilationWindow: { startHour: 23, endHour: 8, label: '23:00–08:00 IST', avgPm25: 90 }
+        }, 'hi');
+        const [, dtStart, dtEnd] = spanMidnightIcs.match(/DTSTART:(\d{8})T173000Z\r\nDTEND:(\d{8})T023000Z/) || [];
+        assert.ok(dtStart && dtEnd && Number(dtEnd) > Number(dtStart), 'Overnight DTEND must advance UTC date');
 
-      const spanMidnightIcs = buildIcsContent({
-        location: { city: 'Delhi' },
-        ventilationWindow: { startHour: 23, endHour: 8, label: '23:00–08:00 IST', avgPm25: 90 }
-      }, 'hi');
-      const [, dtStart, dtEnd] = spanMidnightIcs.match(/DTSTART:(\d{8})T173000Z\r\nDTEND:(\d{8})T023000Z/) || [];
-      assert.ok(dtStart && dtEnd && Number(dtEnd) > Number(dtStart), 'Overnight DTEND must advance UTC date');
+        doc.getElementById('copy-whatsapp-btn').click();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(doc.getElementById('whatsapp-fallback-wrap').hidden, false);
 
-      // Verify WhatsApp fallback textarea appears when clipboard unavailable
-      doc.getElementById('copy-whatsapp-btn').click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      assert.equal(doc.getElementById('whatsapp-fallback-wrap').hidden, false);
+        const enAxe = await axe.run(doc.documentElement, {
+          rules: { 'color-contrast': { enabled: false } }
+        });
+        assert.deepEqual(enAxe.violations, [], `axe EN violations: ${JSON.stringify(enAxe.violations, null, 2)}`);
+        assert.ok(enAxe.passes.some((p) => p.id === 'html-has-lang'));
 
-      const enAxe = await axe.run(doc.documentElement, {
-        rules: { 'color-contrast': { enabled: false } }
-      });
-      assert.deepEqual(enAxe.violations, [], `axe EN violations: ${JSON.stringify(enAxe.violations, null, 2)}`);
-      assert.ok(enAxe.passes.some((p) => p.id === 'html-has-lang'));
-
-      // Switch to Hindi: check <html lang="hi">, preserved expanded table-toggle button text, and 0 axe violations
-      doc.getElementById('lang-hi-btn').click();
-      assert.equal(doc.documentElement.lang, 'hi');
-      assert.equal(toggleBtn.textContent, 'डेटा तालिका छिपाएं');
-      assert.equal(doc.getElementById('close-copilot-btn').hasAttribute('aria-label'), false);
-      const hiAxe = await axe.run(doc.documentElement, {
-        rules: { 'color-contrast': { enabled: false } }
-      });
-      assert.deepEqual(hiAxe.violations, [], `axe HI violations: ${JSON.stringify(hiAxe.violations, null, 2)}`);
+        doc.getElementById('lang-hi-btn').click();
+        assert.equal(doc.documentElement.lang, 'hi');
+        assert.equal(toggleBtn.textContent, 'डेटा तालिका छिपाएं');
+        assert.equal(doc.getElementById('close-copilot-btn').hasAttribute('aria-label'), false);
+        assert.match(doc.querySelector('#inversion-diagram-callouts li').textContent, /मिश्रण परत/);
+        const hiAxe = await axe.run(doc.documentElement, {
+          rules: { 'color-contrast': { enabled: false } }
+        });
+        assert.deepEqual(hiAxe.violations, [], `axe HI violations: ${JSON.stringify(hiAxe.violations, null, 2)}`);
       } finally {
         app.destroy();
       }
