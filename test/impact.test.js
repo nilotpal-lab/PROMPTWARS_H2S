@@ -4,6 +4,7 @@ import {
   calculateHouseholdImpact,
   COMMUTE_FACTORS,
   COMMUNITY_ACTIONS,
+  MIN_CADR_ACH_OPTIMAL,
   PROFILE_PARAMS
 } from '../lib/impact.js';
 
@@ -136,5 +137,17 @@ describe('lib/impact.js — Indoor Box Model, Dosimetry & Emissions Savings', ()
     });
     assert.equal(dirtierSwap.commute.co2eSavedKgPerWeek, 0);
     assert.equal(dirtierSwap.commute.pm25AvoidedGPerWeek, 0);
+  });
+
+  it('exports MIN_CADR_ACH_OPTIMAL and guards non-primitive profile/mask objects safely', () => {
+    assert.equal(MIN_CADR_ACH_OPTIMAL, 4.0);
+    const safe = calculateHouseholdImpact({
+      profile: { toString: null },
+      maskType: { toString: null },
+      purifierMode: { toString: null }
+    });
+    assert.equal(safe.profile, 'commuter');
+    assert.equal(safe.mask.effective, 'none');
+    assert.equal(safe.indoorBox.roomSizeGate, 'inactive');
   });
 });

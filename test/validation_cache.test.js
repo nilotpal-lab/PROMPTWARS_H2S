@@ -47,12 +47,15 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
     assert.equal(validateAqiQuery({ calibratedPm25: '1501' }).ok, false);
     assert.equal(validateAqiQuery({ calibratedPm25: true }).ok, false);
     assert.equal(validateAqiQuery({ city: '<<<>>>' }).ok, false);
+    assert.equal(validateAqiQuery({ lang: { toString: null } }).ok, false);
+    assert.equal(validateAqiQuery(JSON.parse('{"lang":{"toString":null}}')).ok, false);
     assert.equal(validateAqiQuery(JSON.parse('{"__proto__":{"x":1}}')).ok, false);
   });
 
   it('validates /api/plan payloads strictly with enum allowlists and bounds', () => {
     const valid = validatePlanRequest({
       lang: 'hi',
+      profile: 'asthmatic',
       profiles: ['infant', 'asthmatic'],
       maskType: 'n95',
       purifierMode: 'diy_cr_box',
@@ -66,9 +69,14 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
       lon: 77.209
     });
     assert.equal(valid.ok, true);
+    assert.equal(valid.data.profile, 'asthmatic');
     assert.deepEqual(valid.data.profiles, ['infant', 'asthmatic']);
     assert.equal(valid.data.lat, 28.6139);
     assert.equal(valid.data.lon, 77.209);
+
+    const defaultedProfile = validatePlanRequest({ profiles: ['elderly_cardiac', 'commuter'] });
+    assert.equal(defaultedProfile.ok, true);
+    assert.equal(defaultedProfile.data.profile, 'elderly_cardiac');
 
     assert.equal(validatePlanRequest({ lat: 28.6 }).ok, false);
     assert.equal(validatePlanRequest({ lat: 95, lon: 77.2 }).ok, false);
@@ -76,6 +84,8 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
     assert.equal(validatePlanRequest({ maskType: 'bandana' }).ok, false);
     assert.equal(validatePlanRequest({ purifierMode: 'ionizer' }).ok, false);
     assert.equal(validatePlanRequest({ profiles: ['alien'] }).ok, false);
+    assert.equal(validatePlanRequest({ profile: { toString: null } }).ok, false);
+    assert.equal(validatePlanRequest({ lang: { toString: null } }).ok, false);
     assert.equal(validatePlanRequest({ noExhaustTadka: 'yes' }).ok, false);
     assert.equal(validatePlanRequest({ roomVolumeM3: 5 }).ok, false);
     assert.equal(validatePlanRequest({ dailyKm: 500 }).ok, false);
@@ -90,17 +100,23 @@ describe('lib/validation.js — Strict Input Validation, Sanitization & Prototyp
         { role: 'assistant', text: 'Hello' }
       ],
       lang: 'en',
-      context: { lat: 25.5941, lon: 85.1376, profiles: ['elderly_cardiac'] }
+      context: { lat: 25.5941, lon: 85.1376, profile: 'commuter', profiles: ['elderly_cardiac', 'commuter'] }
     });
     assert.equal(valid.ok, true);
     assert.equal(valid.data.message, 'Should I open windows at 2pm?');
     assert.equal(valid.data.history.length, 2);
+    assert.equal(valid.data.context.profile, 'commuter');
     assert.equal(valid.data.context.lat, 25.5941);
     assert.equal(valid.data.context.lon, 85.1376);
 
     assert.equal(validateChatRequest({ message: '' }).ok, false);
     assert.equal(validateChatRequest({ message: '<<<>>>' }).ok, false);
     assert.equal(validateChatRequest({ message: 'a'.repeat(501) }).ok, false);
+    assert.equal(validateChatRequest({ message: 'hi', lang: { toString: null } }).ok, false);
+    assert.equal(
+      validateChatRequest({ message: 'hi', history: [{ role: { toString: null }, text: 'hi' }] }).ok,
+      false
+    );
 
     const sevenTurns = Array.from({ length: 7 }, (_, i) => ({ role: 'user', text: `msg ${i}` }));
     assert.equal(validateChatRequest({ message: 'ok', history: sevenTurns }).ok, false);

@@ -4,6 +4,7 @@ import {
   SCENARIO_PRESETS,
   computeNaqi,
   classifyNaqi,
+  cpcbPm25SubIndexToUgM3,
   usEpaPm25AqiToUgM3,
   computeInversionRisk,
   applyPblCalibration,
@@ -168,5 +169,41 @@ describe('lib/aqi.js — CPCB NAQI, Unit Conversions & PBL Physics', () => {
     assert.equal(snap.current.coMgM3, 0.8);
     assert.equal(snap.current.subIndices.co, 40);
     assert.equal(snap.current.inversionRisk, 'High');
+  });
+
+  it('inverts CPCB PM2.5 sub-indices above 500 cleanly without capping ug/m3 at 999', () => {
+    assert.equal(cpcbPm25SubIndexToUgM3(0), 0);
+    assert.equal(cpcbPm25SubIndexToUgM3(-20), 0);
+    assert.equal(cpcbPm25SubIndexToUgM3(50), 30);
+    assert.equal(cpcbPm25SubIndexToUgM3(500), 380);
+    assert.equal(cpcbPm25SubIndexToUgM3(999), 1028.7);
+    assert.equal(computeNaqi({ pm25: 1500 }).naqi, 999);
+
+    const maxCalSnap = buildAirQualitySnapshot({ presetId: 'delhi-severe', calibratedAqi: 999 });
+    assert.equal(maxCalSnap.calibration.observedPm25, 1028.7);
+  });
+
+  it('breaks dominantPollutant ties by pollutant priority order and handles all-zero inputs', () => {
+    const allZero = computeNaqi({ pm25: 0, pm10: 0, no2: 0, so2: 0, o3: 0, coUgM3: 0 });
+    assert.equal(allZero.naqi, 0);
+    assert.equal(allZero.dominantPollutant, 'PM2.5');
+
+    const empty = computeNaqi({});
+    assert.equal(empty.naqi, 0);
+    assert.equal(empty.dominantPollutant, 'PM2.5');
+
+    const tiedAtFifty = computeNaqi({ pm25: 30, pm10: 50, no2: 40, so2: 40, o3: 50, coMgM3: 1.0 });
+    assert.equal(tiedAtFifty.naqi, 50);
+    assert.equal(tiedAtFifty.dominantPollutant, 'PM2.5');
+  });
+
+  it('calibrates zero-model anchor hours using PBL-weighted additive offset when observedPm25 > 0', () => {
+    const zeroHourly = [
+      { time: '2026-11-25T07:00', pm25: 0, pblMeters: 200, windSpeed10mMs: 0.8 },
+      { time: '2026-11-25T14:00', pm25: 0, pblMeters: 1200, windSpeed10mMs: 3.0 }
+    ];
+    const calibrated = applyPblCalibration(zeroHourly, 180, 0);
+    assert.equal(calibrated[0].pm25, 180);
+    assert.equal(calibrated[1].pm25, 36);
   });
 });
