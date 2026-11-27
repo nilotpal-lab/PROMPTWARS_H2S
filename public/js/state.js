@@ -94,17 +94,9 @@ export function saveChecklist(dateKey, checks) {
   }
 }
 
-function buildInitialHourlySeries() {
-  return buildAirQualitySnapshot({ presetId: 'delhi-severe' }).hourly24h;
-}
-
-/**
- * Create initial state object before first API payload returns.
- * @returns {Record<string, unknown>}
- */
 export function createInitialState() {
   const baseSnapshot = buildAirQualitySnapshot({ presetId: 'delhi-severe' });
-  const hourly24h = baseSnapshot.hourly24h || buildInitialHourlySeries();
+  const hourly24h = baseSnapshot.hourly24h;
   const household = {
     profile: 'commuter',
     profiles: ['commuter'],

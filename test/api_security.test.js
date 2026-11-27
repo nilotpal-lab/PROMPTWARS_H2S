@@ -103,7 +103,7 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
 
     const body = await res.json();
     assert.equal(body.status, 'ok');
-    assert.equal(body.geminiConfigured, true);
+    assert.equal('geminiConfigured' in body, false);
     assert.doesNotMatch(JSON.stringify(body), /super-secret-gemini-key-value/);
   });
 
@@ -339,5 +339,27 @@ describe('server/app.js & api/index.js — HTTP Contracts, Security Headers & Ab
 
     const indexMod = await import('../server/index.js');
     assert.equal(typeof indexMod.startServer, 'function');
+
+    const prevPort = process.env.PORT;
+    process.env.PORT = '45129';
+    const liveServer = indexMod.startServer();
+    try {
+      await new Promise((resolve) => {
+        if (liveServer.listening) {
+          resolve();
+        } else {
+          liveServer.once('listening', resolve);
+        }
+      });
+      const probe = await fetch('http://127.0.0.1:45129/api/health');
+      assert.equal(probe.status, 200);
+    } finally {
+      await new Promise((resolve) => liveServer.close(resolve));
+      if (prevPort === undefined) {
+        delete process.env.PORT;
+      } else {
+        process.env.PORT = prevPort;
+      }
+    }
   });
 });

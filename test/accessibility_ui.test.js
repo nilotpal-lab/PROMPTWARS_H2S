@@ -158,6 +158,21 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
         assert.ok(x >= 0 && x + w <= 560, `Band rect overflowed viewBox: x=${x}, w=${w}`);
       }
 
+      // Close bands stack clearly below legend (y=20) and above PLOT.top (y=72)
+      renderPm25Chart(chartSvg, {
+        location: { city: 'Patna' },
+        current: { istHour: 20 },
+        ventilationWindow: { startHour: 14, endHour: 16, label: '14:00–16:00 IST' },
+        peakSmogWindow: { startHour: 21, endHour: 23, label: '21:00–23:00 IST' },
+        hourly24h: Array.from({ length: 24 }, (_, idx) => ({ istHour: idx, pm25: 120 + idx }))
+      }, 'en');
+      const bandNodes = Array.from(chartSvg.querySelectorAll('text')).filter((n) => /IST$/.test(n.textContent || ''));
+      assert.equal(bandNodes.length, 2);
+      for (const node of bandNodes) {
+        const yVal = Number(node.getAttribute('y'));
+        assert.ok(yVal >= 40 && yVal <= 66, `Header band label y=${yVal} must stay clear of legend (20) and plot (72)`);
+      }
+
       const doseSvg = doc.getElementById('dose-bar-svg');
       renderDoseBarSvg(doseSvg, { dose: { commuteOutdoor: 0, cookingIndoor: 0, baselineIndoor: 0, totalMitigatedUg: 0 } }, 'en');
       assert.equal(doseSvg.getAttribute('viewBox'), '0 0 520 168');
@@ -294,7 +309,7 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
         await new Promise((resolve) => setTimeout(resolve, 20));
         assert.match(hoursRange.getAttribute('aria-valuetext'), /घंटे प्रतिदिन/);
 
-        // GPS denied error displays localized Hindi status banner
+        // GPS denied & timeout errors display localized status banner
         Object.defineProperty(dom.window.navigator, 'geolocation', {
           configurable: true,
           value: {
@@ -303,6 +318,47 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
         });
         gpsBtn.click();
         assert.match(statusBanner.textContent, /लोकेशन की अनुमति नहीं मिली/);
+
+        Object.defineProperty(dom.window.navigator, 'geolocation', {
+          configurable: true,
+          value: {
+            getCurrentPosition: (_ok, errFn) => errFn({ code: 3 })
+          }
+        });
+        gpsBtn.click();
+        assert.ok(statusBanner.textContent.trim().length > 0);
+
+        // Apply and clear manual calibration AQI
+        calInput.value = '355';
+        doc.getElementById('calibration-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.equal(doc.getElementById('clear-calibration-btn').hidden, false);
+        doc.getElementById('clear-calibration-btn').click();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.equal(doc.getElementById('clear-calibration-btn').hidden, true);
+
+        // WhatsApp clipboard copy success + fallback textarea toggle
+        Object.defineProperty(dom.window.navigator, 'clipboard', {
+          configurable: true,
+          value: { writeText: async () => {} }
+        });
+        doc.getElementById('copy-whatsapp-btn').click();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(doc.getElementById('whatsapp-fallback-wrap').hidden, true);
+
+        Object.defineProperty(dom.window.navigator, 'clipboard', {
+          configurable: true,
+          value: { writeText: async () => { throw new Error('denied'); } }
+        });
+        doc.getElementById('copy-whatsapp-btn').click();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(doc.getElementById('whatsapp-fallback-wrap').hidden, false);
+
+        // Copilot submit & error fallback path
+        doc.getElementById('copilot-input').value = 'Can we ventilate now?';
+        doc.getElementById('copilot-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.ok(doc.getElementById('copilot-messages').children.length >= 2);
       } finally {
         globalThis.fetch = prevFetch;
         app.destroy();
@@ -456,9 +512,111 @@ describe('Frontend CSP hygiene, XSS escaping, keyboard navigation & WCAG 2.2 AA+
           rules: { 'color-contrast': { enabled: false } }
         });
         assert.deepEqual(hiAxe.violations, [], `axe HI violations: ${JSON.stringify(hiAxe.violations, null, 2)}`);
+
+        // Additional UI flows: avoid-confidence anchor2 + .ics, preset click, non-404 rollback, profile auto-resync, print/ics, quick chip, and WCAG CSS contrast
+        const prevAnchorFetch = globalThis.fetch;
+        try {
+          let slowReject;
+          globalThis.fetch = (url) => {
+            if (String(url).includes('/api/aqi?') && String(url).includes('coastal-moderate')) {
+              return new Promise((resolve) => resolve(new Response(JSON.stringify({ error: { message: 'Upstream busy' } }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
+            }
+            if (String(url).includes('/api/chat')) {
+              return new Promise((_resolve, reject) => {
+                slowReject = reject;
+              });
+            }
+            return new Response(JSON.stringify(app.state.snapshot), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          };
+
+          // Commit valid city 'Delhi' first, then verify non-404 error rolls back state.query rather than committing failed preset
+          doc.getElementById('city-input').value = 'Delhi';
+          doc.getElementById('city-search-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          assert.equal(app.state.query.city, 'Delhi');
+          doc.getElementById('preset-coastal').click();
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          assert.equal(app.state.query.city, 'Delhi');
+          assert.equal(app.state.query.preset, '');
+          assert.match(doc.getElementById('status-banner').textContent, /Upstream busy/);
+
+          // Editing city clears status-banner alert state cleanly
+          doc.getElementById('city-input').dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+          assert.equal(doc.getElementById('status-banner').classList.contains('status-error'), false);
+
+          // Unchecking all profile checkboxes re-checks commuter fallback in DOM
+          for (const cb of doc.querySelectorAll('input[name="profiles"]')) {
+            cb.checked = false;
+          }
+          doc.querySelector('input[name="profiles"][value="infant"]').dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+          assert.equal(doc.querySelector('input[name="profiles"][value="commuter"]').checked, true);
+
+          // Avoid-confidence 15-min ICS reminder & title
+          const avoidIcs = buildIcsContent({
+            location: { city: 'Delhi' },
+            ventilationWindow: { startHour: 14, endHour: 16, label: '14:00–16:00 IST', avgPm25: 250, confidence: 'avoid' }
+          }, 'en');
+          assert.match(avoidIcs, /Brief <5 Min Flush/);
+
+          // Print & ICS buttons + unsupported geolocation branch
+          dom.window.print = () => {};
+          dom.window.URL.createObjectURL = () => 'blob:mock';
+          dom.window.URL.revokeObjectURL = () => {};
+          doc.getElementById('print-sheet-btn').click();
+          doc.getElementById('download-ics-btn').click();
+
+          Object.defineProperty(dom.window.navigator, 'geolocation', { configurable: true, value: undefined });
+          doc.getElementById('gps-locate-btn').click();
+          assert.equal(doc.getElementById('status-banner').classList.contains('status-error'), true);
+
+          // Quick-chip disables chips while loading & AbortError doesn't unlock early
+          const firstChip = doc.querySelector('.quick-chip-btn');
+          firstChip.click();
+          assert.equal(firstChip.disabled, true);
+          assert.equal(doc.getElementById('copilot-send-btn').disabled, true);
+          const abortErr = new Error('Aborted');
+          abortErr.name = 'AbortError';
+          slowReject(abortErr);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assert.equal(doc.getElementById('copilot-send-btn').disabled, true);
+        } finally {
+          globalThis.fetch = prevAnchorFetch;
+        }
       } finally {
         app.destroy();
       }
     });
+  });
+
+  it('meets WCAG 2.2 AA contrast ratio (>= 4.5:1) across all semantic palette pairs in public/styles.css', async () => {
+    const css = await fs.readFile(path.join(PUBLIC_DIR, 'styles.css'), 'utf8');
+    const tokens = Object.fromEntries(Array.from(css.matchAll(/(--[a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})/g), (m) => [m[1], m[2]]));
+    const relLum = (hex) => {
+      const rgb = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255);
+      const lin = rgb.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    };
+    const ratio = (fg, bg) => {
+      const [l1, l2] = [relLum(fg), relLum(bg)].sort((a, b) => b - a);
+      return (l1 + 0.05) / (l2 + 0.05);
+    };
+    const pairs = [
+      ['--text-primary', '--bg-canvas'],
+      ['--text-primary', '--bg-surface'],
+      ['--text-secondary', '--bg-surface'],
+      ['--text-muted', '--bg-surface'],
+      ['--accent-ink', '--accent-soft'],
+      ['--sev-good-text', '--sev-good-bg'],
+      ['--sev-sat-text', '--sev-sat-bg'],
+      ['--sev-mod-text', '--sev-mod-bg'],
+      ['--sev-poor-text', '--sev-poor-bg'],
+      ['--sev-vpoor-text', '--sev-vpoor-bg'],
+      ['--sev-sev-text', '--sev-sev-bg']
+    ];
+    for (const [fgKey, bgKey] of pairs) {
+      const cr = ratio(tokens[fgKey], tokens[bgKey]);
+      assert.ok(cr >= 4.5, `WCAG AA contrast < 4.5 for ${fgKey}/${bgKey}: ${cr.toFixed(2)}`);
+    }
+    assert.ok(ratio('#FFFFFF', tokens['--accent']) >= 4.5, 'Primary CTA button white-on-accent contrast must be >= 4.5');
   });
 });

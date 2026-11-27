@@ -544,7 +544,7 @@ describe('server/airQualityService.js — Parallel Fan-out, Normalization & Fall
 
     // Coordinate lookup first (cpcbCity=null) must NOT poison named city CPCB lookup
     const geoRes = await svc.getAirQuality({ lat: 28.6139, lon: 77.209 });
-    assert.ok(requestedUrls.some((u) => u.includes('past_days=1') && u.includes('forecast_days=2') && u.includes('Asia%2FKolkata')));
+    assert.ok(requestedUrls.some((u) => u.includes('past_days=1') && u.includes('forecast_days=3') && u.includes('Asia%2FKolkata')));
     assert.ok(requestedUrls.some((u) => u.includes('api.data.gov.in') && u.includes('limit=250')));
     assert.match(geoRes.whatChangedToday.summaryEn, /vs yesterday/);
     assert.ok(geoRes.tomorrowWindow !== null);
@@ -849,11 +849,116 @@ describe('server/geminiService.js — Interactions SDK, Coalescing, Quota & Safe
     assert.equal(clauseViolatesSafety('Put an N95 on your infant and avoid cold drafts'.split(' and ')[0], 420), true);
     assert.equal(clauseViolatesSafety('Put an N95 on your infant to avoid cold drafts', 420), true);
     assert.equal(clauseViolatesSafety('Never put an N95 mask on your infant', 420), false);
+    assert.equal(clauseViolatesSafety('infants under two years of age must never wear an N95 mask', 420), false);
+    assert.equal(clauseViolatesSafety('infant masks are strictly forbidden', 420), false);
+    assert.equal(clauseViolatesSafety('NEVER suggest masks for infants under 2 years old', 420), false);
+    assert.equal(clauseViolatesSafety('Keep infants under 2 years strictly indoors with zero masks', 320), false);
+    assert.equal(clauseViolatesSafety('Keep infants indoors in filtered rooms without any masks', 320), false);
+    assert.equal(clauseViolatesSafety('you must never wash your N95 respirator', 320), false);
+    assert.equal(clauseViolatesSafety('ozone ionizers are strictly prohibited', 200), false);
+    assert.equal(clauseViolatesSafety('Put an N95 on an infant without fear', 420), true);
+    assert.equal(clauseViolatesSafety('Put an N95 on your infant; it is safe', 420), true);
     assert.equal(clauseViolatesSafety('शिशु को कभी मास्क न पहनाएं', 420), false);
     assert.equal(clauseViolatesSafety('Do light indoor exercise or yoga with purifier on', 420), false);
     assert.equal(clauseViolatesSafety('घर के अंदर हल्का व्यायाम करें', 420), false);
     assert.equal(clauseViolatesSafety('Go for a morning jog in the park', 420), true);
+    assert.equal(clauseViolatesSafety('go for a run', 420), true);
+    assert.equal(clauseViolatesSafety('play football outside', 420), true);
+    assert.equal(clauseViolatesSafety('शिशु को बाहर मास्क पहनाएं ताकि धुंध न लगे', 420), true);
+    assert.equal(clauseViolatesSafety('Avoid dust by putting an N95 mask on your infant', 420), true);
+    assert.equal(clauseViolatesSafety('To avoid germs, wash your N95 mask', 200), true);
+    assert.equal(clauseViolatesSafety('6-month-old baby should wear an N95', 420), true);
+    assert.equal(clauseViolatesSafety('under-2 toddler can wear a mask', 420), true);
     assert.equal(clauseViolatesSafety('Use a plasma air cleaner indoors', 200), true);
     assert.equal(clauseViolatesSafety('Rinse your respirator with soap', 200), true);
+  });
+
+  it('handles RPM caps, malformed JSON, timeouts, failed status, markdown links, and airQualityService inFlight coalescing', async () => {
+    const snap = buildAirQualitySnapshot({ presetId: 'delhi-severe' });
+    const imp = calculateHouseholdImpact({ outdoorPm25: snap.current.pm25, profile: 'commuter' });
+
+    const malformed = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key-rpm-check', GEMINI_RPM_CAP: '2' },
+      clientFactory: () => ({ interactions: { create: async () => ({ output_text: '{not-json' }) } })
+    });
+    const mRes = await malformed.answerChat({ message: 'Window time?', history: [], lang: 'en', snapshot: snap, impact: imp });
+    assert.equal(mRes.fallbackReason, 'invalid_schema');
+
+    const failedStatus = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key-status', GEMINI_RPM_CAP: '1' },
+      clientFactory: () => ({ interactions: { create: async () => ({ status: 'failed', output_text: '{"reply":"ok"}' }) } })
+    });
+    const f1 = await failedStatus.answerChat({ message: 'Window time?', history: [], lang: 'en', snapshot: snap, impact: imp });
+    assert.equal(f1.fallbackReason, 'invalid_schema');
+    const f2 = await failedStatus.answerChat({ message: 'Second question?', history: [], lang: 'en', snapshot: snap, impact: imp });
+    assert.equal(f2.fallbackReason, 'quota_exceeded');
+
+    const timedOut = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key-timeout' },
+      clientFactory: () => ({
+        interactions: {
+          create: async () => {
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            throw err;
+          }
+        }
+      })
+    });
+    const tRes = await timedOut.answerChat({ message: 'Window time?', history: [], lang: 'en', snapshot: snap, impact: imp });
+    assert.equal(tRes.fallbackReason, 'timeout');
+
+    const mdLink = createGeminiService({
+      env: { GEMINI_API_KEY: 'test-key-mdlink' },
+      clientFactory: () => ({
+        interactions: {
+          create: async () => ({ output_text: JSON.stringify({ reply: 'NAQI 340 [click here](https://evil.example)' }) })
+        }
+      })
+    });
+    const mdRes = await mdLink.answerChat({ message: 'Window time?', history: [], lang: 'en', snapshot: snap, impact: imp });
+    assert.equal(mdRes.fallbackReason, 'safety_or_schema_rejected');
+
+    // airQualityService coalesces concurrent cold-cache fetches for the same target
+    let geoHits = 0;
+    let omHits = 0;
+    const coalescedSvc = createAirQualityService({
+      env: {},
+      fetchImpl: async (url) => {
+        const s = String(url);
+        if (s.includes('geocoding-api.open-meteo.com')) {
+          geoHits += 1;
+          await new Promise((r) => setTimeout(r, 15));
+          return new Response(JSON.stringify({ results: [{ name: 'Kanpur', admin1: 'Uttar Pradesh', country_code: 'IN', latitude: 26.45, longitude: 80.33, feature_code: 'PPLA2' }] }), { status: 200 });
+        }
+        if (s.includes('open-meteo.com')) {
+          omHits += 1;
+          await new Promise((r) => setTimeout(r, 15));
+          const hours = Array.from({ length: 48 }, (_, idx) => {
+            const d = new Date(Date.now() + (idx - 12) * 3600 * 1000).toISOString().slice(0, 16);
+            return d;
+          });
+          return new Response(JSON.stringify({
+            hourly: {
+              time: hours,
+              pm2_5: hours.map(() => 140),
+              pm10: hours.map(() => 210),
+              boundary_layer_height: hours.map(() => 350),
+              wind_speed_10m: hours.map(() => 2.1),
+              relative_humidity_2m: hours.map(() => 70)
+            }
+          }), { status: 200 });
+        }
+        return new Response('{}', { status: 404 });
+      }
+    });
+    const [r1, r2] = await Promise.all([
+      coalescedSvc.getAirQuality({ city: 'Kanpur', calibratedAqi: 300 }),
+      coalescedSvc.getAirQuality({ city: 'Kanpur', calibratedAqi: 340 })
+    ]);
+    assert.equal(geoHits, 1);
+    assert.equal(omHits <= 2, true); // 1 aq + 1 wx fetch (not 4!)
+    assert.equal(r1.calibration.source, 'local-naqi');
+    assert.equal(r2.current.naqi >= r1.current.naqi, true);
   });
 });

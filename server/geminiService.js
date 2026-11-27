@@ -85,21 +85,24 @@ const CHAT_RESPONSE_SCHEMA = {
 };
 
 const UNSAFE_HTML_REGEX = /<[a-z!/]|javascript:|onerror\s*=|onload\s*=/i;
+const MARKDOWN_LINK_REGEX = /\[[^\]]+\]\(\s*(?:https?:|javascript:|data:|\/)/i;
 const SUB_CLAUSE_SPLIT_REGEX = /[,.;!?\n।]+|\b(?:and|but|while|or|also|unless|except|और|लेकिन|पर)\b/gi;
 const DOUBLE_NEGATIVE_REGEX =
   /\b(?:not\s+hesitate|don't\s+hesitate|do\s+not\s+hesitate|don't\s+skip|do\s+not\s+skip|never\s+skip|no\s+problem|no\s+harm|no\s+issue|safe\s+to|okay\s+to|fine\s+to)\b/i;
 const SAFE_EN_PROHIBITION_REGEX =
-  /\b(?:never\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|recommend|exercise|jog|cycle|do|go|allow|let)|do\s+not\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|exercise|jog|cycle|do|go|allow|let)|don't\s+(?:put|place|use|wear|wash|rinse|launder|boil|soak|run|buy|try|exercise|jog|cycle|do|go|allow|let)|no\s+(?:masks?|ozone|ionizers?|plasma|outdoor\s+(?:exercise|jog|run))\b|mask\s+forbidden|avoid|disable|skip|stop|cancel|turn\s+off|harmful|destructive|myth|false)\b/gi;
+  /\b(?:(?:never|do\s+not|don't|should\s+not|shouldn't|must\s+not|mustn't|cannot|can't|not\s+safe\s+to|not\s+recommended\s+to|avoid|skip)\s+(?:put(?:ting)?|place|placing|use|using|wear(?:ing)?|wash(?:ing)?|rins(?:e|ing)|launder(?:ing)?|boil(?:ing)?|soak(?:ing)?|run(?:ning)?|buy(?:ing)?|try(?:ing)?|recommend(?:ing)?|suggest(?:ing)?|advise|advising|give|giving|fit(?:ting)?|offer(?:ing)?|exercise|exercising|jog(?:ging)?|cycl(?:e|ing)|do|doing|go|going|allow(?:ing)?|let(?:ting)?|play(?:ing)?|walk(?:ing)?)|(?:(?:no|zero|avoid(?:ing)?)\s+(?:any\s+)?|without\s+(?:any\s+)?)(?:masks?|n95s?|kn95s?|respirators?|face\s+coverings?|ozone|ionizers?|plasma|outdoor\s+(?:exercise|jog|run))\b|not\s+(?:safe|recommended|advised|allowed)|mask\s+forbidden|unsafe|prohibited|forbidden|disable|stop|cancel|turn\s+off|harmful|destructive|myth|false)\b/gi;
+const SAFE_EN_PREDICATE_PROHIBITION_REGEX =
+  /\b(?:is|are|should\s+be|must\s+be|remain|remains)\s+(?:strictly\s+|completely\s+|entirely\s+|never\s+|always\s+)?(?:forbidden|prohibited|banned|unsafe|harmful|dangerous|toxic|not\s+(?:safe|recommended|advised|allowed))\b/gi;
 const SAFE_HI_PROHIBITION_REGEX =
-  /मास्क\s+न|न\s+पहनाएं|मना|बंद|मत|बचें|कभी\s+नहीं|धोएं\s+नहीं|न\s+धोएं|खतरनाक|गलत|भ्रम|रद्द|टालें|(?:^|\s)न(?:\s|$)/giu;
+  /मास्क\s+न(?:\s*(?:पहनाएं|दें|लगाएं))?|न\s*(?:पहनाएं|दें|लगाएं|धोएं|उबालें|चलाएं|दौड़ें|करें)|आयोनाइज़र\s+न\b|ओज़ोन\s+न\b|मना|बंद|मत|बचें|कभी\s+नहीं|धोएं\s+नहीं|खतरनाक|गलत|भ्रम|रद्द|टालें/giu;
 const INFANT_MENTION_REGEX =
-  /\b(?:infants?|bab(?:y|ies)|newborns?|toddlers?|under\s*(?:2|two)|1-year-old)\b|शिशु|नवजात|2\s*(?:साल|वर्ष)\s*से\s*(?:कम|छोट[ेा])/i;
+  /\b(?:infants?|bab(?:y|ies)|newborns?|toddlers?|under[\s-]*(?:2|two)|1[\s-]*year[\s-]*old|(?:[1-9]|1[0-9]|2[0-3])[\s-]*months?[\s-]*old)\b|शिशु|नवजात|2\s*(?:साल|वर्ष)\s*से\s*(?:कम|छोट[ेा])/i;
 const MASK_MENTION_REGEX = /\b(?:masks?|n95s?|kn95s?|respirators?|face\s+coverings?)\b|मास्क/i;
 const OZONE_MENTION_REGEX = /\b(?:ozone|ionizers?|plasma)\b|ओज़ोन|आयोनाइज़र/i;
 const WASH_VERB_REGEX =
   /\b(?:wash(?:ing|ed)?|rins(?:e|ing)|launder(?:ing)?|soap|boil(?:ing|ed)?|soak(?:ing)?)\b|धो(?:ना|ने|एं)?|उबाल(?:ना|ने)?/i;
 const SEVERE_EXERCISE_MENTION_REGEX =
-  /\b(?:outdoor\s+(?:run|running|jog|jogging|cycling|exercise|workout|sports)|morning\s+jog|park\s+run|(?:run|running|jog|jogging|cycling|exercis(?:e|ing))\s+(?:outside|outdoors))\b|बाहर\s*(?:दौड़|सैर|व्यायाम|कसरत)|व्यायाम|कसरत/i;
+  /\b(?:outdoor\s+(?:run|running|jog|jogging|cycling|exercise|workout|sports)|morning\s+jog|park\s+run|(?:run|running|jog|jogging|cycling|exercis(?:e|ing)|brisk\s+walk(?:ing)?|walk(?:ing)?\s+briskly|play(?:ing)?\s+(?:football|cricket|basketball|badminton|tennis))\s+(?:outside|outdoors)|go(?:ing)?\s+for\s+a\s+(?:run|jog)|play(?:ing)?\s+(?:football|cricket))\b|बाहर\s*(?:दौड़|सैर|व्यायाम|कसरत)|व्यायाम|कसरत/i;
 const INDOOR_EXEMPT_REGEX = /\b(?:indoors?)\b|घर\s*के\s*अंदर/i;
 const EXPLICIT_OUTDOOR_REGEX = /\b(?:outdoor|outdoors|outside|park\s+run|morning\s+jog)\b|बाहर/i;
 
@@ -169,28 +172,48 @@ function collectRiskyMatches(clause, naqi) {
 }
 
 /**
+ * Return true if any regex match inside `clause` satisfies `predicate(start, end)`.
+ * @param {string} clause
+ * @param {RegExp} regex
+ * @param {(start: number, end: number) => boolean} predicate
+ * @returns {boolean}
+ */
+function anyMatchInClause(clause, regex, predicate) {
+  for (const m of clause.matchAll(regex)) {
+    const start = m.index ?? 0;
+    if (predicate(start, start + m[0].length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Verify a risky match is governed by a safe prohibition token in the same sub-clause
- * (within 45 chars BEFORE the risky token in English, or within 45 chars in Hindi SOV).
+ * (leading/enclosing or trailing copula in English, or within 45 chars in Hindi SOV).
  * @param {string} clause
  * @param {RegExpExecArray} match
  * @returns {boolean}
  */
 function hasLocalSafeProhibition(clause, match) {
-  const targetStart = match.index;
-  const targetEnd = targetStart + match[0].length;
-  for (const m of clause.matchAll(SAFE_EN_PROHIBITION_REGEX)) {
-    const pEnd = (m.index ?? 0) + m[0].length;
-    if (targetStart - pEnd >= 0 && targetStart - pEnd <= 45) {
-      return true;
-    }
-  }
-  for (const m of clause.matchAll(SAFE_HI_PROHIBITION_REGEX)) {
-    const pStart = m.index ?? 0;
-    if (pStart >= targetStart - 45 && pStart <= targetEnd + 45) {
-      return true;
-    }
-  }
-  return false;
+  const tStart = match.index;
+  const tEnd = tStart + match[0].length;
+  const hasLeading = anyMatchInClause(
+    clause,
+    SAFE_EN_PROHIBITION_REGEX,
+    (pStart, pEnd) => (pStart <= tStart && pEnd >= tEnd) || (tStart - pEnd >= 0 && tStart - pEnd <= 45)
+  );
+  const hasTrailing = anyMatchInClause(
+    clause,
+    SAFE_EN_PREDICATE_PROHIBITION_REGEX,
+    (pStart) => pStart >= tEnd && pStart - tEnd <= 45
+  );
+  const hasHindi = anyMatchInClause(
+    clause,
+    SAFE_HI_PROHIBITION_REGEX,
+    (pStart) => pStart >= tStart - 45 && pStart <= tEnd + 45
+  );
+  return hasLeading || hasTrailing || hasHindi;
 }
 
 /**
@@ -218,7 +241,7 @@ export function clauseViolatesSafety(clause, naqi) {
  * @returns {boolean}
  */
 function violatesSafetyOrSanity(text, naqi, extraSecrets) {
-  if (UNSAFE_HTML_REGEX.test(text) || redactSecrets(text, extraSecrets) !== text) {
+  if (UNSAFE_HTML_REGEX.test(text) || MARKDOWN_LINK_REGEX.test(text) || redactSecrets(text, extraSecrets) !== text) {
     return true;
   }
   const clauses = text.split(SUB_CLAUSE_SPLIT_REGEX).filter((c) => c && c.trim().length > 0);

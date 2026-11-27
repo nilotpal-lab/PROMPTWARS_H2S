@@ -6,7 +6,7 @@
 import { formatNumber } from './i18n.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const PLOT = Object.freeze({ left: 52, right: 540, top: 54, bottom: 252, width: 488, height: 198 });
+const PLOT = Object.freeze({ left: 52, right: 540, top: 72, bottom: 252, width: 488, height: 180 });
 
 function svgEl(tag, attrs = {}, text = null) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -107,23 +107,24 @@ function drawWindowBand(svg, win, hourly, colorHex, patternId) {
 
 function drawHeaderBandLabels(svg, ventLabel, peakLabel) {
   const placed = [ventLabel, peakLabel].filter(Boolean);
-  if (placed.length === 2 && Math.abs(placed[0].x - placed[1].x) < 136) {
+  const tooClose = placed.length === 2 && Math.abs(placed[0].x - placed[1].x) < 168;
+  if (tooClose) {
     if (placed[0].x <= placed[1].x) {
-      placed[0].x = Math.max(PLOT.left + 64, placed[0].x - 36);
-      placed[1].x = Math.min(PLOT.right - 64, placed[1].x + 36);
+      placed[0].x = Math.max(PLOT.left + 68, placed[0].x - 36);
+      placed[1].x = Math.min(PLOT.right - 68, placed[1].x + 36);
     } else {
-      placed[1].x = Math.max(PLOT.left + 64, placed[1].x - 36);
-      placed[0].x = Math.min(PLOT.right - 64, placed[0].x + 36);
+      placed[1].x = Math.max(PLOT.left + 68, placed[1].x - 36);
+      placed[0].x = Math.min(PLOT.right - 68, placed[0].x + 36);
     }
   }
   for (const [idx, item] of placed.entries()) {
-    const yPos = idx === 1 && placed.length === 2 && Math.abs(placed[0].x - placed[1].x) < 136 ? 35 : 46;
+    const yPos = idx === 1 && tooClose ? 62 : 42;
     svg.append(svgEl('text', {
       x: item.x.toFixed(1),
       y: yPos,
       'text-anchor': 'middle',
       fill: item.color,
-      'font-size': 14,
+      'font-size': 13.5,
       'font-weight': 600
     }, item.text));
   }
@@ -146,7 +147,7 @@ function drawGridAndAxes(svg, maxY, hourly) {
   for (const val of [0, Math.round(maxY / 2), maxY]) {
     const y = PLOT.bottom - (val / maxY) * PLOT.height;
     svg.append(svgEl('line', { x1: PLOT.left, y1: y.toFixed(1), x2: PLOT.right, y2: y.toFixed(1), stroke: '#CBD2D9', 'stroke-width': 1 }));
-    svg.append(svgEl('text', { x: PLOT.left - 8, y: (y + 5).toFixed(1), 'text-anchor': 'end', fill: '#4A5565', 'font-size': 14 }, val));
+    svg.append(svgEl('text', { x: PLOT.left - 8, y: (y + 5).toFixed(1), 'text-anchor': 'end', fill: '#4A5565', 'font-size': 14.5 }, val));
   }
 
   const thresholdY = PLOT.bottom - (Math.min(90, maxY) / maxY) * PLOT.height;
@@ -160,13 +161,13 @@ function drawGridAndAxes(svg, maxY, hourly) {
     'stroke-dasharray': '5 4'
   }));
   const thresholdLabelY = thresholdY - 7 >= PLOT.top + 14 ? thresholdY - 7 : thresholdY + 16;
-  svg.append(svgEl('text', { x: PLOT.right - 4, y: thresholdLabelY.toFixed(1), 'text-anchor': 'end', fill: '#593900', 'font-size': 14, 'font-weight': 600 }, '90 µg/m³'));
+  svg.append(svgEl('text', { x: PLOT.left + 6, y: thresholdLabelY.toFixed(1), 'text-anchor': 'start', fill: '#593900', 'font-size': 14, 'font-weight': 600 }, '90 µg/m³'));
 
   const denom = Math.max(hourly.length - 1, 1);
   for (const idx of collectAxisTickIndices(hourly)) {
     const hr = resolveHourAt(hourly[idx], idx);
     const x = Math.min(PLOT.right - 18, Math.max(PLOT.left + 18, PLOT.left + (idx / denom) * PLOT.width));
-    svg.append(svgEl('text', { x: x.toFixed(1), y: 277, 'text-anchor': 'middle', fill: '#4A5565', 'font-size': 14 }, `${String(hr).padStart(2, '0')}:00`));
+    svg.append(svgEl('text', { x: x.toFixed(1), y: 277, 'text-anchor': 'middle', fill: '#4A5565', 'font-size': 14.5 }, `${String(hr).padStart(2, '0')}:00`));
   }
 }
 
@@ -177,8 +178,8 @@ function drawLegend(svg, isHi) {
     { x: 356, fill: 'url(#peak-hatch)', stroke: '#B91C1C', label: isHi ? 'चरम धुंध' : 'Peak smog' }
   ];
   for (const item of items) {
-    svg.append(svgEl('rect', { x: item.x, y: 10, width: 14, height: 14, rx: 3, fill: item.fill, stroke: item.stroke, 'stroke-width': 1 }));
-    svg.append(svgEl('text', { x: item.x + 20, y: 22, fill: '#364152', 'font-size': 14, 'font-weight': 500 }, item.label));
+    svg.append(svgEl('rect', { x: item.x, y: 9, width: 14, height: 14, rx: 3, fill: item.fill, stroke: item.stroke, 'stroke-width': 1 }));
+    svg.append(svgEl('text', { x: item.x + 20, y: 20, fill: '#364152', 'font-size': 13.5, 'font-weight': 500 }, item.label));
   }
 }
 

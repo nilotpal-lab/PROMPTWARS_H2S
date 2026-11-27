@@ -235,8 +235,7 @@ export function createApp(deps = {}) {
     res.json({
       status: 'ok',
       service: 'vayumitra',
-      timestamp: new Date(now()).toISOString(),
-      geminiConfigured: Boolean((env.GEMINI_API_KEY ?? '').trim())
+      timestamp: new Date(now()).toISOString()
     });
   });
 
@@ -249,7 +248,9 @@ export function createApp(deps = {}) {
         sendError(res, 400, 'INVALID_QUERY', check.error);
         return;
       }
-      const snapshot = await airQualityService.getAirQuality(check.data);
+      const aqiQuery = { ...check.data };
+      delete aqiQuery.lang;
+      const snapshot = await airQualityService.getAirQuality(aqiQuery);
       res.setHeader(
         'Cache-Control',
         snapshot?.stale ? 'no-store' : 'public, s-maxage=300, stale-while-revalidate=900'

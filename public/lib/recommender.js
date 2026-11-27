@@ -495,7 +495,9 @@ export function buildThreeAnchorRoutine(snapshot, profiles, isHi) {
     {
       id: 'midday_flush',
       timeWindow: win.label,
-      title: t({ en: 'Mid-Day 20-Min Flush & Window', hi: 'दोपहर वेंटिलेशन और फ्लश' }, isHi),
+      title: win.confidence === 'avoid'
+        ? t({ en: 'Mid-Day High-Smog Brief Flush (<5 min)', hi: 'अत्यधिक धुंध: केवल <5 मिनट त्वरित हवा' }, isHi)
+        : t({ en: 'Mid-Day 20-Min Flush & Window', hi: 'दोपहर वेंटिलेशन और फ्लश' }, isHi),
       status: win.confidence,
       conflictNote: t(
         {

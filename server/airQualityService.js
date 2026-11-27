@@ -564,6 +564,19 @@ export function createAirQualityService(deps = {}) {
   const env = deps.env ?? process.env;
   const now = typeof deps.now === 'function' ? deps.now : () => Date.now();
   const envSecrets = [env.WAQI_API_KEY, env.DATA_GOV_IN_API_KEY, env.NASA_FIRMS_MAP_KEY].filter(Boolean);
+  const inFlight = new Map();
+
+  function runCoalesced(key, fn) {
+    const existing = inFlight.get(key);
+    if (existing) {
+      return existing;
+    }
+    const promise = fn().finally(() => {
+      inFlight.delete(key);
+    });
+    inFlight.set(key, promise);
+    return promise;
+  }
 
   async function geocodeCity(cityName) {
     const normalized = cityName.trim().toLowerCase();
@@ -573,25 +586,27 @@ export function createAirQualityService(deps = {}) {
       return cached;
     }
 
-    const params = new URLSearchParams({ name: cityName, count: '8', language: 'en', format: 'json' });
-    try {
-      const res = await safeFetch(`https://geocoding-api.open-meteo.com/v1/search?${params}`, {
-        timeoutMs: 3500,
-        fetchImpl,
-        secrets: envSecrets
-      });
-      if (res.ok) {
-        const picked = pickBestGeoResult(await res.json().then((j) => j?.results));
-        if (picked) {
-          cache.set(geoKey, picked, GEO_TTL_MS);
+    return runCoalesced(geoKey, async () => {
+      const params = new URLSearchParams({ name: cityName, count: '8', language: 'en', format: 'json' });
+      try {
+        const res = await safeFetch(`https://geocoding-api.open-meteo.com/v1/search?${params}`, {
+          timeoutMs: 3500,
+          fetchImpl,
+          secrets: envSecrets
+        });
+        if (res.ok) {
+          const picked = pickBestGeoResult(await res.json().then((j) => j?.results));
+          if (picked) {
+            cache.set(geoKey, picked, GEO_TTL_MS);
+          }
+          return picked;
         }
-        return picked;
+      } catch {
+        // Fallback to built-in Indian city table if geocoding fails or is offline
       }
-    } catch {
-      // Fallback to built-in Indian city table if geocoding fails or is offline
-    }
 
-    return KNOWN_INDIAN_CITIES[normalized] ?? null;
+      return KNOWN_INDIAN_CITIES[normalized] ?? null;
+    });
   }
 
   async function fetchTier0(lat, lon) {
@@ -599,7 +614,7 @@ export function createAirQualityService(deps = {}) {
       latitude: String(lat),
       longitude: String(lon),
       past_days: '1',
-      forecast_days: '2',
+      forecast_days: '3',
       timezone: 'Asia/Kolkata',
       hourly: 'pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone'
     });
@@ -607,7 +622,7 @@ export function createAirQualityService(deps = {}) {
       latitude: String(lat),
       longitude: String(lon),
       past_days: '1',
-      forecast_days: '2',
+      forecast_days: '3',
       timezone: 'Asia/Kolkata',
       hourly: 'boundary_layer_height,wind_speed_10m,relative_humidity_2m'
     });
@@ -824,24 +839,27 @@ export function createAirQualityService(deps = {}) {
 
   async function fetchLiveWithFallback(target, query, cacheKey) {
     try {
-      const [tier0, optional] = await Promise.all([
-        fetchTier0(target.lat, target.lon),
-        fetchOptionalTiers(target.lat, target.lon, target.city, target.cpcbCity)
-      ]);
-      // Omit request-specific city strings from coordinate cache to prevent cache poisoning
-      const livePayload = {
-        hourly48h: tier0.hourly48h,
-        yesterday: tier0.yesterday,
-        lat: target.lat,
-        lon: target.lon,
-        presetId: null,
-        source: 'open-meteo',
-        fetchedAt: new Date(now()).toISOString(),
-        stale: false,
-        ...reconcileOptionalMeta(optional)
-      };
-      cache.set(`stale:${cacheKey}`, livePayload, STALE_TTL_MS);
-      cache.set(cacheKey, livePayload, FRESH_TTL_MS);
+      const livePayload = await runCoalesced(cacheKey, async () => {
+        const [tier0, optional] = await Promise.all([
+          fetchTier0(target.lat, target.lon),
+          fetchOptionalTiers(target.lat, target.lon, target.city, target.cpcbCity)
+        ]);
+        // Omit request-specific city strings from coordinate cache to prevent cache poisoning
+        const payload = {
+          hourly48h: tier0.hourly48h,
+          yesterday: tier0.yesterday,
+          lat: target.lat,
+          lon: target.lon,
+          presetId: null,
+          source: 'open-meteo',
+          fetchedAt: new Date(now()).toISOString(),
+          stale: false,
+          ...reconcileOptionalMeta(optional)
+        };
+        cache.set(`stale:${cacheKey}`, payload, STALE_TTL_MS);
+        cache.set(cacheKey, payload, FRESH_TTL_MS);
+        return payload;
+      });
       return assembleResponse(livePayload, query, target);
     } catch {
       const stalePayload = cache.get(`stale:${cacheKey}`);

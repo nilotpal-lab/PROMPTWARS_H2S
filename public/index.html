@@ -13,6 +13,9 @@
   <link rel="modulepreload" href="/js/api.js">
   <link rel="modulepreload" href="/js/charts.js">
   <link rel="modulepreload" href="/js/renderers.js">
+  <link rel="modulepreload" href="/lib/aqi.js">
+  <link rel="modulepreload" href="/lib/impact.js">
+  <link rel="modulepreload" href="/lib/recommender.js">
   <script type="module" src="/js/app.js"></script>
 </head>
 <body>
@@ -53,7 +56,7 @@
       <h2 id="location-heading" class="section-kicker" data-i18n="locationHeading">Location, Winter Scenarios &amp; Local Monitor Calibration</h2>
 
       <div class="location-grid">
-        <form id="city-search-form" class="search-form" role="search">
+        <form id="city-search-form" class="search-form" role="search" novalidate>
           <label for="city-input" class="field-label" data-i18n="citySearchLabel">Indian city or locality</label>
           <div class="input-row">
             <input
@@ -101,7 +104,7 @@
           </div>
         </div>
 
-        <form id="calibration-form" class="calibration-form">
+        <form id="calibration-form" class="calibration-form" novalidate>
           <label for="calibrated-aqi-input" class="field-label" data-i18n="calibrationLabel">Local monitor calibration (NAQI 1–999)</label>
           <div class="input-row">
             <input

@@ -422,6 +422,12 @@ function updateInfantSafetyVisibility(refs, impact, household) {
   banner.hidden = !hasInfant;
 }
 
+function formatReducedDoseText(dose, lang) {
+  const reducedPct = Number(dose.percentReduced) || 0;
+  const pctStr = reducedPct > 0 ? `-${formatNumber(reducedPct, lang)}%` : `${formatNumber(0, lang)}%`;
+  return `${pctStr} (${formatNumber(dose.avoidedUg, lang)} µg)`;
+}
+
 /**
  * Render 0ms instant simulator KPIs, slider aria-valuetext, infant safety rule, CADR gate, and math disclosures.
  * @param {Record<string, HTMLElement | null>} refs
@@ -441,7 +447,7 @@ export function renderSimulatorReadout(refs, impact, household, snapshot, lang) 
   const hoursFormatted = formatNumber(Number(household.outdoorHours), lang, 1);
 
   setText(refs['sim-dose-value'], `${formatNumber(dose.totalMitigatedUg, lang)} ${isHi ? 'µg/दिन' : 'µg/day'}`);
-  setText(refs['sim-reduced-value'], `-${formatNumber(dose.percentReduced, lang)}% (${formatNumber(dose.avoidedUg, lang)} µg)`);
+  setText(refs['sim-reduced-value'], formatReducedDoseText(dose, lang));
   setText(refs['sim-indoor-value'], `${formatNumber(box.cInUgM3, lang, 1)} µg/m³ (${formatNumber(box.indoorOutdoorRatio, lang, 2)}×)`);
   setText(refs['room-volume-display'], roomText);
   setText(refs['outdoor-hours-display'], `${hoursFormatted} ${isHi ? 'घंटे' : 'h'}`);
@@ -694,7 +700,12 @@ function syncCopilotMessages(msgBox, messages, lang) {
   const needsRebuild = prevLang !== lang || list.length < prevCount || msgBox.children.length !== prevCount;
 
   if (needsRebuild) {
+    const prevLive = msgBox.getAttribute('aria-live');
+    msgBox.removeAttribute('aria-live');
     msgBox.replaceChildren(...list.map(buildChatBubble));
+    if (prevLive) {
+      msgBox.setAttribute('aria-live', prevLive);
+    }
   } else if (list.length > prevCount) {
     msgBox.append(...list.slice(prevCount).map(buildChatBubble));
   }
@@ -749,6 +760,25 @@ function resolveVentIcsHours(win) {
   return { startHr, endHr };
 }
 
+function buildVentEventMeta(win, city, startHr, endHr, isHi) {
+  if (win.confidence === 'avoid') {
+    return {
+      endHr: startHr + 0.25,
+      summary: isHi ? `VayuMitra त्वरित <5 मिनट फ्लश (${city})` : `VayuMitra Brief <5 Min Flush (${city})`,
+      description: isHi
+        ? `अत्यधिक धुंध (${win.label}, औसत PM2.5 ${win.avgPm25} ug/m3)। लंबी हवा बंद रखें — केवल खाना पकाने के बाद <5 मिनट खिड़की खोलकर प्यूरीफायर हाई पर चलाएं।`
+        : `High smog alert (${win.label}, avg PM2.5 ${win.avgPm25} ug/m3). Avoid extended ventilation — flush <5 min only after cooking with purifier on high.`
+    };
+  }
+  return {
+    endHr,
+    summary: isHi ? `VayuMitra दोपहर वेंटिलेशन (${city})` : `VayuMitra Mid-Day Ventilation (${city})`,
+    description: isHi
+      ? `दोपहर हवा समय ${win.label}, औसत PM2.5 ${win.avgPm25} ug/m3। घर की CO2 निकालने के लिए 15–20 मिनट खिड़कियां खोलें।`
+      : `Midday airing slot ${win.label}, avg PM2.5 ${win.avgPm25} ug/m3. Open opposite windows briefly to purge indoor CO2.`
+  };
+}
+
 /**
  * Build RFC 5545 .ics calendar reminders for Today's Midday Ventilation & Evening Lockdown.
  * @param {Record<string, unknown>} snapshot
@@ -762,10 +792,7 @@ export function buildIcsContent(snapshot, lang) {
   const win = snapshot?.ventilationWindow || { startHour: 13, endHour: 15, label: '13:00–15:00 IST', avgPm25: 120 };
   const city = snapshot?.location?.city || (isHi ? 'भारत' : 'India');
   const { startHr, endHr } = resolveVentIcsHours(win);
-
-  const ventDesc = isHi
-    ? `दोपहर हवा समय ${win.label}, औसत PM2.5 ${win.avgPm25} ug/m3। घर की CO2 निकालने के लिए 15–20 मिनट खिड़कियां खोलें।`
-    : `Midday airing slot ${win.label}, avg PM2.5 ${win.avgPm25} ug/m3. Open opposite windows briefly to purge indoor CO2.`;
+  const vent = buildVentEventMeta(win, city, startHr, endHr, isHi);
   const lockDesc = isHi
     ? 'शाम के समय से पहले खिड़कियां बंद करें और खाना बनाते समय रसोई एग्जॉस्ट चलाएं।'
     : 'Close windows before evening chill traps smoke; switch on kitchen exhaust during cooking.';
@@ -778,9 +805,9 @@ export function buildIcsContent(snapshot, lang) {
     `UID:vayumitra-vent-${dateKey}@vayumitra.local`,
     `DTSTAMP:${stamp}`,
     `DTSTART:${istHourToUtcStamp(dateKey, startHr)}`,
-    `DTEND:${istHourToUtcStamp(dateKey, endHr)}`,
-    `SUMMARY:${escapeIcsText(isHi ? `VayuMitra दोपहर वेंटिलेशन (${city})` : `VayuMitra Mid-Day Ventilation (${city})`)}`,
-    `DESCRIPTION:${escapeIcsText(ventDesc)}`,
+    `DTEND:${istHourToUtcStamp(dateKey, vent.endHr)}`,
+    `SUMMARY:${escapeIcsText(vent.summary)}`,
+    `DESCRIPTION:${escapeIcsText(vent.description)}`,
     'END:VEVENT',
     'BEGIN:VEVENT',
     `UID:vayumitra-lock-${dateKey}@vayumitra.local`,

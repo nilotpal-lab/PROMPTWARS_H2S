@@ -188,6 +188,12 @@ function readSelectVal(doc, id, fallback) {
 
 function readProfileSelection(doc) {
   const checked = Array.from(doc.querySelectorAll('input[name="profiles"]:checked')).map((el) => el.value);
+  if (checked.length === 0) {
+    const fallbackBox = doc.querySelector('input[name="profiles"][value="commuter"]');
+    if (fallbackBox) {
+      fallbackBox.checked = true;
+    }
+  }
   const profiles = checked.length > 0 ? checked : ['commuter'];
   const selectVal = readSelectVal(doc, 'profile-select', '');
   const profile = profiles.includes(selectVal) ? selectVal : profiles[0];
@@ -305,14 +311,14 @@ function bindGpsButton(doc, refs, state, setStatus, refreshAqiAndPlan) {
           return;
         }
         clearFieldInvalid(refs['city-input'], null);
-        if (refs['city-input']) {
-          refs['city-input'].value = '';
-        }
-        state.query.city = '';
-        state.query.preset = '';
-        state.query.lat = Number(lat.toFixed(4));
-        state.query.lon = Number(lon.toFixed(4));
-        refreshAqiAndPlan();
+        refreshAqiAndPlan(
+          { ...state.query, city: '', preset: '', lat: Number(lat.toFixed(4)), lon: Number(lon.toFixed(4)) },
+          () => {
+            if (refs['city-input']) {
+              refs['city-input'].value = '';
+            }
+          }
+        );
       },
       (geoErr) => {
         gpsBtn.disabled = false;
@@ -326,9 +332,20 @@ function bindGpsButton(doc, refs, state, setStatus, refreshAqiAndPlan) {
 function bindLocationHandlers(doc, refs, state, setStatus, refreshAqiAndPlan) {
   const cityInput = refs['city-input'] || doc.getElementById('city-input');
   const calInput = refs['calibrated-aqi-input'] || doc.getElementById('calibrated-aqi-input');
+  const clearBannerError = () => {
+    if (refs['status-banner']?.classList.contains('status-error')) {
+      setStatus(state.snapshot?.stale ? String(getStrings(state.lang).staleNotice) : '', false);
+    }
+  };
 
-  cityInput?.addEventListener('input', () => clearFieldInvalid(cityInput, null));
-  calInput?.addEventListener('input', () => clearFieldInvalid(calInput, null));
+  cityInput?.addEventListener('input', () => {
+    clearFieldInvalid(cityInput, null);
+    clearBannerError();
+  });
+  calInput?.addEventListener('input', () => {
+    clearFieldInvalid(calInput, null);
+    clearBannerError();
+  });
 
   doc.getElementById('city-search-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -341,24 +358,21 @@ function bindLocationHandlers(doc, refs, state, setStatus, refreshAqiAndPlan) {
       return;
     }
     clearFieldInvalid(cityInput, null);
-    state.query.city = cityVal;
-    state.query.preset = '';
-    state.query.lat = null;
-    state.query.lon = null;
-    refreshAqiAndPlan();
+    refreshAqiAndPlan({ ...state.query, city: cityVal, preset: '', lat: null, lon: null });
   });
 
   for (const btn of doc.querySelectorAll('[data-preset]')) {
     btn.addEventListener('click', () => {
       clearFieldInvalid(cityInput, null);
-      state.query.preset = btn.getAttribute('data-preset') || 'delhi-severe';
-      state.query.city = '';
-      state.query.lat = null;
-      state.query.lon = null;
-      if (cityInput) {
-        cityInput.value = '';
-      }
-      refreshAqiAndPlan();
+      const nextPreset = btn.getAttribute('data-preset') || 'delhi-severe';
+      refreshAqiAndPlan(
+        { ...state.query, preset: nextPreset, city: '', lat: null, lon: null },
+        () => {
+          if (cityInput) {
+            cityInput.value = '';
+          }
+        }
+      );
     });
   }
 
@@ -374,23 +388,29 @@ function bindLocationHandlers(doc, refs, state, setStatus, refreshAqiAndPlan) {
       return;
     }
     clearFieldInvalid(calInput, null);
-    state.query.calibratedAqi = Math.round(raw);
-    if (refs['clear-calibration-btn']) {
-      refs['clear-calibration-btn'].hidden = false;
-    }
-    refreshAqiAndPlan();
+    refreshAqiAndPlan(
+      { ...state.query, calibratedAqi: Math.round(raw) },
+      () => {
+        if (refs['clear-calibration-btn']) {
+          refs['clear-calibration-btn'].hidden = false;
+        }
+      }
+    );
   });
 
   refs['clear-calibration-btn']?.addEventListener('click', () => {
     clearFieldInvalid(calInput, null);
-    state.query.calibratedAqi = null;
-    if (calInput) {
-      calInput.value = '';
-    }
-    if (refs['clear-calibration-btn']) {
-      refs['clear-calibration-btn'].hidden = true;
-    }
-    refreshAqiAndPlan();
+    refreshAqiAndPlan(
+      { ...state.query, calibratedAqi: null },
+      () => {
+        if (calInput) {
+          calInput.value = '';
+        }
+        if (refs['clear-calibration-btn']) {
+          refs['clear-calibration-btn'].hidden = true;
+        }
+      }
+    );
   });
 
   bindGpsButton(doc, refs, state, setStatus, refreshAqiAndPlan);
@@ -494,7 +514,7 @@ function bindUtilityActions(doc, refs, state, onLangChange) {
   doc.getElementById('print-sheet-btn')?.addEventListener('click', () => window.print());
 }
 
-function setCopilotLoading(refs, loading, lang) {
+function setCopilotLoading(refs, loading, lang, doc = null) {
   const msgBox = refs['copilot-messages'];
   const sendBtn = refs['copilot-send-btn'];
   const statusEl = refs['copilot-status'];
@@ -503,6 +523,12 @@ function setCopilotLoading(refs, loading, lang) {
   }
   if (sendBtn) {
     sendBtn.disabled = loading;
+  }
+  const chipScope = doc || refs['copilot-quick-chips'];
+  if (chipScope) {
+    for (const chip of chipScope.querySelectorAll('.quick-chip-btn')) {
+      chip.disabled = loading;
+    }
   }
   if (statusEl) {
     statusEl.textContent = loading ? String(getStrings(lang).sendingStatus) : '';
@@ -644,13 +670,17 @@ export function initApp(doc = document) {
     }
   };
 
-  const refreshAqiAndPlan = async () => {
+  const refreshAqiAndPlan = async (pendingQuery = state.query, onSuccess = null) => {
     const dict = getStrings(state.lang);
     setStatus(String(dict.loadingStatus), false);
     try {
-      const snap = await fetchAqiSnapshot({ ...state.query, lang: state.lang });
+      const snap = await fetchAqiSnapshot({ ...pendingQuery, lang: state.lang });
       if (snap?.current) {
-        lastValidQuery = { ...state.query };
+        state.query = { ...pendingQuery };
+        lastValidQuery = { ...pendingQuery };
+        if (typeof onSuccess === 'function') {
+          onSuccess();
+        }
         state.snapshot = snap;
         state.impact = computeImpactMirror(snap.current.pm25, state.household);
         state.plan = buildDeterministicPlanForState(state);
@@ -667,8 +697,8 @@ export function initApp(doc = document) {
       if (isAbortError(err)) {
         return;
       }
+      state.query = { ...lastValidQuery };
       if (err.status === 404 || err.code === 'CITY_NOT_FOUND') {
-        state.query = { ...lastValidQuery };
         setFieldInvalid(refs['city-input'], 'status-banner', null, '');
         setStatus(String(dict.cityNotFoundError), true);
         return;
@@ -684,7 +714,7 @@ export function initApp(doc = document) {
     }
     const historySlice = state.chatHistory.slice(-6).map((m) => ({ role: m.role, text: m.text }));
     const pendingList = [...state.chatHistory, { role: 'user', text: trimmed }];
-    setCopilotLoading(refs, true, state.lang);
+    setCopilotLoading(refs, true, state.lang, doc);
     renderCopilotPanel(refs, pendingList, state.snapshot, state.lang, sendChatPrompt);
 
     try {
@@ -696,12 +726,15 @@ export function initApp(doc = document) {
         meta: buildChatMeta(data, state.lang),
         safetyNotice: data.safetyNotice
       });
-      setCopilotLoading(refs, false, state.lang);
+      setCopilotLoading(refs, false, state.lang, doc);
       renderCopilotSection();
     } catch (err) {
-      setCopilotLoading(refs, false, state.lang);
-      if (!isAbortError(err) && refs['copilot-status']) {
-        refs['copilot-status'].textContent = `${getStrings(state.lang).errorPrefix}${err.message}`;
+      if (isAbortError(err)) {
+        return;
+      }
+      setCopilotLoading(refs, false, state.lang, doc);
+      if (refs['copilot-status']) {
+        refs['copilot-status'].textContent = `${getStrings(state.lang).copilotErrorPrefix}${err.message}`;
       }
       renderCopilotSection();
     }
